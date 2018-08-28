@@ -23,8 +23,14 @@ Flags:
   --version              Show application version.
 ```
 
-## build and run
+## run Docker image
+
+```bash
+docker run quay.io/freshtracks.io/avalanche --help
 ```
-go build -o=./avalanche ./cmd/avalanche.go
-./avalanche --help
+
+## build and run go binary
+```bash
+go get github.com/prometheus/prometheus/cmd/...
+avalanche --help
 ```
