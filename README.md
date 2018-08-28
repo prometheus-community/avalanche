@@ -25,6 +25,6 @@ Flags:
 
 ## build and run
 ```
-go build -o=./avalanche ./cmd
+go build -o=./avalanche ./cmd/avalanche.go
 ./avalanche --help
 ```
