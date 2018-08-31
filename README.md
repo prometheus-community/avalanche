@@ -23,6 +23,8 @@ Flags:
   --version              Show application version.
 ```
 
+Checkout the [blog post](https://blog.freshtracks.io/load-testing-prometheus-metric-ingestion-5b878711711c).
+
 ## run Docker image
 
 ```bash
