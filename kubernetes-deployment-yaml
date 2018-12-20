@@ -1,0 +1,47 @@
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: StatefulSet
+metadata:
+  name: pg-avalanche
+  namespace: avalanche
+  labels:
+    name: avalanche
+spec:
+  selector:
+    matchLabels:
+      app: pg-avalanche
+  replicas: 1 # tells deployment to run 2 pods matching the template
+  template:
+    metadata:
+      labels:
+        app: pg-avalanche
+    spec:
+      containers:
+      - name: pg-avalanche
+        image: quay.io/freshtracks.io/avalanche
+        args:
+        - "--metric-count=1000"
+        - "--series-count=50"
+        - "--port=9001"
+        ports:
+        - containerPort: 9001
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-avalanche
+  namespace: avalanche
+  labels:
+    app: pg-avalanche
+spec:
+  ports:
+    # the port that this service should serve on
+    - port: 9001
+      targetPort: 9001
+      name: http-avalanche
+  type: ClusterIP
+  clusterIP: None
+  # label keys and values that must match in order to receive traffic for this service
+  selector:
+    app: pg-avalanche
