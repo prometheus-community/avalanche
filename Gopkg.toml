@@ -29,10 +29,12 @@
   go-tests = true
   unused-packages = true
 
-[[constraint]]
-  name = "github.com/alecthomas/kingpin"
-  version = "2.2.6"
+# ErrTruncated was removed after this version, and Prometheus hasn't caught up
+[[override]]
+  name = "github.com/miekg/dns"
+  revision = "7064f7248f5fa5fd79382a76328b4e200b79e4ae"
 
-[[constraint]]
-  name = "github.com/prometheus/client_golang"
-  version = "0.8.0"
+# Copied from Cortex project - left alone dep picks a beta release
+[[override]]
+  name = "github.com/Azure/azure-sdk-for-go"
+  revision = "bd73d950fa4440dae889bd9917bff7cef539f86e"
