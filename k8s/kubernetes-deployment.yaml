@@ -1,0 +1,56 @@
+#create namespace avalanche
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: avalanche
+spec:
+  finalizers:
+  - kubernetes
+---
+#create deployment avalanche
+apiVersion: apps/v1 
+kind: Deployment
+metadata:
+  name: avalanche
+  namespace: avalanche
+  labels:
+    name: avalanche
+spec:
+  selector:
+    matchLabels:
+      app: avalanche
+  replicas: 1 # tells deployment to run 1 pods matching the template
+  template:
+    metadata:
+      labels:
+        app: avalanche
+    spec:
+      containers:
+      - name: pg-avalanche
+        image: quay.io/freshtracks.io/avalanche:latest
+        args:
+        - "--metric-count=1000"
+        - "--series-count=50"
+        - "--port=9001"
+        ports:
+        - containerPort: 9001
+---
+#create service avalanche-svc
+apiVersion: v1
+kind: Service
+metadata:
+  name: avalanche-svc
+  namespace: avalanche
+  labels:
+    app: avalanche
+spec:
+  ports:
+    # the port that this service should serve on
+    - port: 9001
+      targetPort: 9001
+      name: http-avalanche
+  type: ClusterIP
+  clusterIP: None
+  # label keys and values that must match in order to receive traffic for this service
+  selector:
+    app: avalanche
