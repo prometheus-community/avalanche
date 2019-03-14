@@ -1,19 +1,30 @@
-apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
-kind: StatefulSet
+#create namespace avalanche
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: pg-avalanche
+  name: avalanche
+spec:
+  finalizers:
+  - kubernetes
+
+---
+#create deployment avalanche
+apiVersion: apps/v1 
+kind: Deployment
+metadata:
+  name: avalanche
   namespace: avalanche
   labels:
     name: avalanche
 spec:
   selector:
     matchLabels:
-      app: pg-avalanche
-  replicas: 1 # tells deployment to run 2 pods matching the template
+      app: avalanche
+  replicas: 1 # tells deployment to run 1 pods matching the template
   template:
     metadata:
       labels:
-        app: pg-avalanche
+        app: avalanche
     spec:
       containers:
       - name: pg-avalanche
@@ -27,13 +38,14 @@ spec:
 
 
 ---
+#create service avalanche-svc
 apiVersion: v1
 kind: Service
 metadata:
-  name: pg-avalanche
+  name: avalanche-svc
   namespace: avalanche
   labels:
-    app: pg-avalanche
+    app: avalanche
 spec:
   ports:
     # the port that this service should serve on
@@ -44,4 +56,4 @@ spec:
   clusterIP: None
   # label keys and values that must match in order to receive traffic for this service
   selector:
-    app: pg-avalanche
+    app: avalanche
