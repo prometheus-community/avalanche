@@ -6,7 +6,6 @@ metadata:
 spec:
   finalizers:
   - kubernetes
-
 ---
 #create deployment avalanche
 apiVersion: apps/v1 
@@ -28,15 +27,13 @@ spec:
     spec:
       containers:
       - name: pg-avalanche
-        image: quay.io/freshtracks.io/avalanche
+        image: quay.io/freshtracks.io/avalanche:latest
         args:
         - "--metric-count=1000"
         - "--series-count=50"
         - "--port=9001"
         ports:
         - containerPort: 9001
-
-
 ---
 #create service avalanche-svc
 apiVersion: v1
