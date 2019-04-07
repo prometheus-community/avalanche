@@ -76,8 +76,8 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 	}
 }
 
-// ServeMetrics serves a prometheus metrics endpoint with test series
-func ServeMetrics(port int, metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int) error {
+// RunMetrics creates a set of Prometheus test series that update over time
+func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) error {
 	labelKeys := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -121,10 +121,21 @@ func ServeMetrics(port int, metricCount int, labelCount int, seriesCount int, me
 		}
 	}()
 
+	go func() {
+		<-stop
+		valueTick.Stop()
+		seriesTick.Stop()
+		metricTick.Stop()
+	}()
+
+	return nil
+}
+
+// ServeMetrics serves a prometheus metrics endpoint with test series
+func ServeMetrics(port int) error {
 	http.Handle("/metrics", promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{}))
 	err := http.ListenAndServe(fmt.Sprintf(":%v", port), nil)
 	if err != nil {
-		valueTick.Stop()
 		return err
 	}
 
