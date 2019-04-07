@@ -21,12 +21,18 @@ var (
 )
 
 func main() {
-	kingpin.Version("0.1-rad")
+	kingpin.Version("0.2")
 	kingpin.CommandLine.Help = "avalanche - metrics test server"
 
 	kingpin.Parse()
+	stop := make(chan struct{})
+	defer close(stop)
+	err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, stop)
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Printf("Serving ur metrics at localhost:%v/metrics\n", *port)
-	err := metrics.ServeMetrics(*port, *metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval)
+	err = metrics.ServeMetrics(*port)
 	if err != nil {
 		log.Fatal(err)
 	}
