@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	promRegistry = prometheus.NewRegistry() // local Registry so we don't get Go metrics, etc.
 	valGenerator = rand.New(rand.NewSource(time.Now().UnixNano()))
 	metrics      = make([]*prometheus.GaugeVec, 0)
 	metricsMux   = &sync.Mutex{}
@@ -27,7 +28,7 @@ func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKe
 			Name: fmt.Sprintf("avalanche_metric_%s_%v_%v", strings.Repeat("m", metricLength), metricCycle, idx),
 			Help: "A tasty metric morsel",
 		}, append([]string{"series_id", "cycle_id"}, labelKeys...))
-		prometheus.MustRegister(gauge)
+		promRegistry.MustRegister(gauge)
 		metrics[idx] = gauge
 	}
 }
@@ -36,7 +37,7 @@ func unregisterMetrics() {
 	metricsMux.Lock()
 	defer metricsMux.Unlock()
 	for _, metric := range metrics {
-		prometheus.Unregister(metric)
+		promRegistry.Unregister(metric)
 	}
 }
 
@@ -120,7 +121,7 @@ func ServeMetrics(port int, metricCount int, labelCount int, seriesCount int, me
 		}
 	}()
 
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{}))
 	err := http.ListenAndServe(fmt.Sprintf(":%v", port), nil)
 	if err != nil {
 		valueTick.Stop()
