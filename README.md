@@ -33,6 +33,6 @@ docker run quay.io/freshtracks.io/avalanche --help
 
 ## build and run go binary
 ```bash
-go get github.com/prometheus/prometheus/cmd/...
+go get github.com/open-fresh/avalanche/cmd/...
 avalanche --help
 ```
