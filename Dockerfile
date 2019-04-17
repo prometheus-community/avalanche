@@ -1,5 +1,5 @@
-FROM golang:1.9
-WORKDIR /go/src/github.com/Fresh-Tracks/avalanche
+FROM golang:1.12.1
+WORKDIR /go/src/github.com/open-fresh/avalanche
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o=/bin/avalanche ./cmd
 
