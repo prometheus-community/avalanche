@@ -35,6 +35,7 @@ type ConfigWrite struct {
 	RequestCount int
 	UpdateNotify chan struct{}
 	PprofURLs    []*url.URL
+	Tenant       string
 }
 
 // Client for the remote write requests.
@@ -48,7 +49,7 @@ type Client struct {
 // sends metrics to a prometheus compatible remote endpoint.
 func SendRemoteWrite(config ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{}
-	rt = &cortexTenantRoundTripper{tenant: "0", rt: rt}
+	rt = &cortexTenantRoundTripper{tenant: config.Tenant, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
