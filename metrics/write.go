@@ -29,9 +29,9 @@ type Client struct {
 	timeout time.Duration
 }
 
-func SendRemoteWrite(u url.URL) error {
+func SendRemoteWrite(u url.URL, tenant string) error {
 	var rt http.RoundTripper = &http.Transport{}
-	rt = &cortexTenantRoundTripper{tenant: "0", rt: rt}
+	rt = &cortexTenantRoundTripper{tenant: tenant, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{

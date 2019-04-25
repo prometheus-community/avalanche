@@ -19,6 +19,7 @@ var (
 	metricInterval = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
 	port           = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL      = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
+	remoteTenant   = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("1").String()
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 	}
 	if *remoteURL != nil {
 		// First cut: just send the metrics once then exit
-		err = metrics.SendRemoteWrite(**remoteURL)
+		err = metrics.SendRemoteWrite(**remoteURL, *remoteTenant)
 		if err != nil {
 			log.Fatal(err)
 		}
