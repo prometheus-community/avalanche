@@ -77,7 +77,7 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) error {
+func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -94,11 +94,16 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	valueTick := time.NewTicker(time.Duration(valueInterval) * time.Second)
 	seriesTick := time.NewTicker(time.Duration(seriesInterval) * time.Second)
 	metricTick := time.NewTicker(time.Duration(metricInterval) * time.Second)
+	updateNotify := make(chan struct{}, 1)
 
 	go func() {
 		for tick := range valueTick.C {
 			fmt.Printf("%v: refreshing metric values\n", tick)
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
@@ -108,6 +113,10 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 			deleteValues(labelKeys, labelValues, seriesCount, seriesCycle)
 			seriesCycle++
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
@@ -118,6 +127,10 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 			unregisterMetrics()
 			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
@@ -128,7 +141,7 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 		metricTick.Stop()
 	}()
 
-	return nil
+	return updateNotify, nil
 }
 
 // ServeMetrics serves a prometheus metrics endpoint with test series

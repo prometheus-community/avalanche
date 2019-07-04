@@ -27,19 +27,33 @@ type Client struct {
 	url     *url.URL
 	client  *http.Client
 	timeout time.Duration
+	batchSize,
+	samplesCount,
+	valueInterval,
+	labelInterval,
+	metricInterval int
+	updateNotify chan struct{}
 }
 
-func SendRemoteWrite(u url.URL) error {
+// SendRemoteWrite initializes a http client and
+// sends metrics to a prometheus compatible remote endpoint.
+func SendRemoteWrite(u url.URL, batchSize, samplesCount, valueInterval, labelInterval, metricInterval int, updateNotify chan struct{}) error {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &cortexTenantRoundTripper{tenant: "0", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
-		url:     &u,
-		client:  httpClient,
-		timeout: time.Minute,
+		url:            &u,
+		client:         httpClient,
+		timeout:        time.Minute,
+		batchSize:      batchSize,
+		samplesCount:   samplesCount,
+		valueInterval:  valueInterval,
+		labelInterval:  labelInterval,
+		metricInterval: metricInterval,
+		updateNotify:   updateNotify,
 	}
-	return c.Write()
+	return c.write()
 }
 
 // Add the tenant ID header required by Cortex
@@ -68,29 +82,59 @@ func cloneRequest(r *http.Request) *http.Request {
 	return r2
 }
 
-const maxSendSize = 1000
+func (c *Client) write() error {
 
-func (c *Client) Write() error {
-	metricFamilies, err := promRegistry.Gather()
+	tss, err := collectMetrics()
 	if err != nil {
 		return err
 	}
-	tss := ToTimeSeriesSlice(metricFamilies)
-	fmt.Printf("Sending %d timeseries\n", len(tss))
-	for i := 0; i < len(tss); i += maxSendSize {
-		end := i + maxSendSize
-		if end > len(tss) {
-			end = len(tss)
+
+	var (
+		totalTime    time.Duration
+		totalSamples int
+	)
+
+	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request\n", len(tss), c.samplesCount, c.batchSize)
+	for ii := 0; ii < c.samplesCount; ii++ {
+		select {
+		case <-c.updateNotify:
+			fmt.Println("updating remote write metrics")
+			tss, err = collectMetrics()
+			if err != nil {
+				return err
+			}
+		default:
 		}
-		req := &prompb.WriteRequest{
-			Timeseries: tss[i:end],
+
+		start := time.Now()
+		for i := 0; i < len(tss); i += c.batchSize {
+			end := i + c.batchSize
+			if end > len(tss) {
+				end = len(tss)
+			}
+			req := &prompb.WriteRequest{
+				Timeseries: tss[i:end],
+			}
+			err = c.Store(context.TODO(), req)
+			if err != nil {
+				return err
+			}
+			totalSamples += len(tss[i:end])
 		}
-		err = c.Store(context.TODO(), req)
-		if err != nil {
-			return err
-		}
+		totalTime += time.Since(start)
 	}
+	fmt.Printf("Time: %v ; samples/sec: %v\n", totalTime.Round(time.Second), int(float64(totalSamples)/totalTime.Seconds()))
 	return nil
+}
+
+func collectMetrics() ([]prompb.TimeSeries, error) {
+	metricsMux.Lock()
+	metricFamilies, err := promRegistry.Gather()
+	if err != nil {
+		return nil, err
+	}
+	metricsMux.Unlock()
+	return ToTimeSeriesSlice(metricFamilies), nil
 }
 
 // ToTimeSeriesSlice converts a slice of metricFamilies containing samples into a slice of TimeSeries
