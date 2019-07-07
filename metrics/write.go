@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -16,6 +17,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 
+	"github.com/open-fresh/avalanche/pkg/errors"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -92,6 +94,9 @@ func (c *Client) write() error {
 	var (
 		totalTime    time.Duration
 		totalSamples int
+		mtx          sync.Mutex
+		wg           sync.WaitGroup
+		merr         = &errors.MultiError{}
 	)
 
 	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request\n", len(tss), c.samplesCount, c.batchSize)
@@ -101,30 +106,37 @@ func (c *Client) write() error {
 			fmt.Println("updating remote write metrics")
 			tss, err = collectMetrics()
 			if err != nil {
-				return err
+				merr.Add(err)
 			}
 		default:
 		}
-
 		start := time.Now()
 		for i := 0; i < len(tss); i += c.batchSize {
-			end := i + c.batchSize
-			if end > len(tss) {
-				end = len(tss)
-			}
-			req := &prompb.WriteRequest{
-				Timeseries: tss[i:end],
-			}
-			err = c.Store(context.TODO(), req)
-			if err != nil {
-				return err
-			}
-			totalSamples += len(tss[i:end])
+			wg.Add(1)
+			go func(i int) {
+				end := i + c.batchSize
+				if end > len(tss) {
+					end = len(tss)
+				}
+				req := &prompb.WriteRequest{
+					Timeseries: tss[i:end],
+				}
+				err = c.Store(context.TODO(), req)
+				if err != nil {
+					merr.Add(err)
+				}
+				mtx.Lock()
+				totalSamples += len(tss[i:end])
+				mtx.Unlock()
+				wg.Done()
+			}(i)
 		}
+		wg.Wait()
 		totalTime += time.Since(start)
 	}
+
 	fmt.Printf("Time: %v ; samples/sec: %v\n", totalTime.Round(time.Second), int(float64(totalSamples)/totalTime.Seconds()))
-	return nil
+	return merr.Err()
 }
 
 func collectMetrics() ([]prompb.TimeSeries, error) {

@@ -36,6 +36,9 @@ func main() {
 	}
 
 	if *remoteURL != nil {
+		if (**remoteURL).Host == "" || (**remoteURL).Scheme == "" {
+			log.Fatal("remote host and scheme can't be empty")
+		}
 		if *remoteBatchSize <= 0 {
 			log.Fatal("remote send batch size should be more than zero")
 		}
