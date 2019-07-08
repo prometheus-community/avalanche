@@ -8,9 +8,9 @@ import (
 
 // MultiError type implements the error interface, and contains the
 // Errors used to construct it.
-type MultiError struct{
+type MultiError struct {
 	errors []error
-	mtx sync.Mutex
+	mtx    sync.Mutex
 }
 
 // Error returns a concatenated string of the contained errors
@@ -55,4 +55,11 @@ func (es *MultiError) Err() error {
 		return nil
 	}
 	return es
+}
+
+// Count shows current errors count.
+func (es *MultiError) Count() int {
+	es.mtx.Lock()
+	defer es.mtx.Unlock()
+	return len(es.errors)
 }

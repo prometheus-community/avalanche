@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/open-fresh/avalanche/pkg/download"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 
@@ -25,35 +27,34 @@ const maxErrMsgLen = 256
 
 var userAgent = "avalanche"
 
+// ConfigWrite for the remote write requests.
+type ConfigWrite struct {
+	URL             url.URL
+	RequestInterval time.Duration
+	BatchSize,
+	SamplesCount int
+	UpdateNotify chan struct{}
+	PprofURLs    []*url.URL
+}
+
+// Client for the remote write requests.
 type Client struct {
-	url     *url.URL
 	client  *http.Client
 	timeout time.Duration
-	batchSize,
-	samplesCount,
-	valueInterval,
-	labelInterval,
-	metricInterval int
-	updateNotify chan struct{}
+	config  ConfigWrite
 }
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(u url.URL, batchSize, samplesCount, valueInterval, labelInterval, metricInterval int, updateNotify chan struct{}) error {
+func SendRemoteWrite(config ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &cortexTenantRoundTripper{tenant: "0", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
-		url:            &u,
-		client:         httpClient,
-		timeout:        time.Minute,
-		batchSize:      batchSize,
-		samplesCount:   samplesCount,
-		valueInterval:  valueInterval,
-		labelInterval:  labelInterval,
-		metricInterval: metricInterval,
-		updateNotify:   updateNotify,
+		client:  httpClient,
+		timeout: time.Minute,
+		config:  config,
 	}
 	return c.write()
 }
@@ -95,26 +96,38 @@ func (c *Client) write() error {
 		totalTime    time.Duration
 		totalSamples int
 		mtx          sync.Mutex
-		wg           sync.WaitGroup
+		wgMetrics    sync.WaitGroup
+		wgPprof      sync.WaitGroup
 		merr         = &errors.MultiError{}
 	)
 
-	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request\n", len(tss), c.samplesCount, c.batchSize)
-	for ii := 0; ii < c.samplesCount; ii++ {
+	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.SamplesCount, c.config.BatchSize, c.config.RequestInterval)
+	for ii := 0; ii < c.config.SamplesCount; ii++ {
+		// Download the pprofs during half of the iteration to get avarege readings.
+		// Do that only when it is not set to take profiles at a given interval.
+		if len(c.config.PprofURLs) > 0 && ii == c.config.SamplesCount/2 {
+			wgPprof.Add(1)
+			go func() {
+				download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
+				wgPprof.Done()
+			}()
+		}
+		time.Sleep(c.config.RequestInterval)
 		select {
-		case <-c.updateNotify:
-			fmt.Println("updating remote write metrics")
+		case <-c.config.UpdateNotify:
+			log.Println("updating remote write metrics")
 			tss, err = collectMetrics()
 			if err != nil {
 				merr.Add(err)
 			}
 		default:
 		}
+
 		start := time.Now()
-		for i := 0; i < len(tss); i += c.batchSize {
-			wg.Add(1)
+		for i := 0; i < len(tss); i += c.config.BatchSize {
+			wgMetrics.Add(1)
 			go func(i int) {
-				end := i + c.batchSize
+				end := i + c.config.BatchSize
 				if end > len(tss) {
 					end = len(tss)
 				}
@@ -128,14 +141,18 @@ func (c *Client) write() error {
 				mtx.Lock()
 				totalSamples += len(tss[i:end])
 				mtx.Unlock()
-				wg.Done()
+				wgMetrics.Done()
 			}(i)
 		}
-		wg.Wait()
+		wgMetrics.Wait()
 		totalTime += time.Since(start)
+		if merr.Count() > 20 {
+			merr.Add(fmt.Errorf("too many errors"))
+			return merr.Err()
+		}
 	}
-
-	fmt.Printf("Time: %v ; samples/sec: %v\n", totalTime.Round(time.Second), int(float64(totalSamples)/totalTime.Seconds()))
+	wgPprof.Wait()
+	fmt.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamples, int(float64(totalSamples)/totalTime.Seconds()))
 	return merr.Err()
 }
 
@@ -205,7 +222,7 @@ func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
 	}
 
 	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(compressed))
+	httpReq, err := http.NewRequest("POST", c.config.URL.String(), bytes.NewReader(compressed))
 	if err != nil {
 		// Errors from NewRequest are from unparseable URLs, so are not
 		// recoverable.
