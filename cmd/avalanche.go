@@ -101,8 +101,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		done <- struct{}{}
-		wg.Wait()
+		if *remotePprofInterval > 0 {
+			done <- struct{}{}
+			wg.Wait()
+		}
 		return
 	}
 
