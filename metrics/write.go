@@ -93,12 +93,13 @@ func (c *Client) write() error {
 	}
 
 	var (
-		totalTime    time.Duration
-		totalSamples int
-		mtx          sync.Mutex
-		wgMetrics    sync.WaitGroup
-		wgPprof      sync.WaitGroup
-		merr         = &errors.MultiError{}
+		totalTime       time.Duration
+		totalSamplesExp = len(tss) * c.config.SamplesCount
+		totalSamplesAct int
+		mtx             sync.Mutex
+		wgMetrics       sync.WaitGroup
+		wgPprof         sync.WaitGroup
+		merr            = &errors.MultiError{}
 	)
 
 	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.SamplesCount, c.config.BatchSize, c.config.RequestInterval)
@@ -141,7 +142,7 @@ func (c *Client) write() error {
 					return
 				}
 				mtx.Lock()
-				totalSamples += len(tss[i:end])
+				totalSamplesAct += len(tss[i:end])
 				mtx.Unlock()
 
 			}(i)
@@ -154,10 +155,10 @@ func (c *Client) write() error {
 		}
 	}
 	wgPprof.Wait()
-	if c.config.SamplesCount*len(tss) != totalSamples {
-		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", c.config.SamplesCount*len(tss), totalSamples))
+	if c.config.SamplesCount*len(tss) != totalSamplesAct {
+		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	fmt.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamples, int(float64(totalSamples)/totalTime.Seconds()))
+	fmt.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
 	return merr.Err()
 }
 
