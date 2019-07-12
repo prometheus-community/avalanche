@@ -127,6 +127,7 @@ func (c *Client) write() error {
 		for i := 0; i < len(tss); i += c.config.BatchSize {
 			wgMetrics.Add(1)
 			go func(i int) {
+				defer wgMetrics.Done()
 				end := i + c.config.BatchSize
 				if end > len(tss) {
 					end = len(tss)
@@ -134,14 +135,15 @@ func (c *Client) write() error {
 				req := &prompb.WriteRequest{
 					Timeseries: tss[i:end],
 				}
-				err = c.Store(context.TODO(), req)
+				err := c.Store(context.TODO(), req)
 				if err != nil {
 					merr.Add(err)
+					return
 				}
 				mtx.Lock()
 				totalSamples += len(tss[i:end])
 				mtx.Unlock()
-				wgMetrics.Done()
+
 			}(i)
 		}
 		wgMetrics.Wait()
@@ -152,17 +154,20 @@ func (c *Client) write() error {
 		}
 	}
 	wgPprof.Wait()
+	if c.config.SamplesCount*len(tss) != totalSamples {
+		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", c.config.SamplesCount*len(tss), totalSamples))
+	}
 	fmt.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamples, int(float64(totalSamples)/totalTime.Seconds()))
 	return merr.Err()
 }
 
 func collectMetrics() ([]prompb.TimeSeries, error) {
 	metricsMux.Lock()
+	defer metricsMux.Unlock()
 	metricFamilies, err := promRegistry.Gather()
 	if err != nil {
 		return nil, err
 	}
-	metricsMux.Unlock()
 	return ToTimeSeriesSlice(metricFamilies), nil
 }
 

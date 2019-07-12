@@ -20,8 +20,6 @@ var (
 )
 
 func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKeys []string) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	metrics = make([]*prometheus.GaugeVec, metricCount)
 	for idx := 0; idx < metricCount; idx++ {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -34,8 +32,6 @@ func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKe
 }
 
 func unregisterMetrics() {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		promRegistry.Unregister(metric)
 	}
@@ -55,8 +51,6 @@ func seriesLabels(seriesID int, cycleID int, labelKeys []string, labelValues []s
 }
 
 func deleteValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -66,8 +60,6 @@ func deleteValues(labelKeys []string, labelValues []string, seriesCount int, ser
 }
 
 func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -99,7 +91,9 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	go func() {
 		for tick := range valueTick.C {
 			fmt.Printf("%v: refreshing metric values\n", tick)
+			metricsMux.Lock()
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
 			default:
@@ -110,9 +104,11 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	go func() {
 		for tick := range seriesTick.C {
 			fmt.Printf("%v: refreshing series cycle\n", tick)
+			metricsMux.Lock()
 			deleteValues(labelKeys, labelValues, seriesCount, seriesCycle)
 			seriesCycle++
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
 			default:
@@ -123,10 +119,12 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	go func() {
 		for tick := range metricTick.C {
 			fmt.Printf("%v: refreshing metric cycle\n", tick)
+			metricsMux.Lock()
 			metricCycle++
 			unregisterMetrics()
 			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
 			default:
