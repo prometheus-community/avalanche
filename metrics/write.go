@@ -102,7 +102,7 @@ func (c *Client) write() error {
 		merr            = &errors.MultiError{}
 	)
 
-	fmt.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.SamplesCount, c.config.BatchSize, c.config.RequestInterval)
+	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.SamplesCount, c.config.BatchSize, c.config.RequestInterval)
 	for ii := 0; ii < c.config.SamplesCount; ii++ {
 		// Download the pprofs during half of the iteration to get avarege readings.
 		// Do that only when it is not set to take profiles at a given interval.
@@ -158,7 +158,7 @@ func (c *Client) write() error {
 	if c.config.SamplesCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	fmt.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
+	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
 	return merr.Err()
 }
 

@@ -26,8 +26,8 @@ var (
 	remoteURL           = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs     = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
 	remotePprofInterval = kingpin.Flag("remote-pprof-interval", "how often to download pprof profiles.When not provided it will download a profile once before the end of the test.").Duration()
-	remoteBatchSize     = kingpin.Flag("remote-send-batch", "how many samples to send with each remote_write API request.").Default("2000").Int()
-	remoteSamplesCount  = kingpin.Flag("remote-samples-count", "how many samples to send in total to the remote_write API.").Default("100").Int()
+	remoteBatchSize     = kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
+	remoteSamplesCount  = kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
 	remoteReqsInterval  = kingpin.Flag("remote-write-interval", "delay between each remote write request.").Duration()
 )
 
