@@ -122,6 +122,7 @@ func (c *Client) write() error {
 				merr.Add(err)
 			}
 		default:
+			tss = updateTimetamps(tss)
 		}
 
 		start := time.Now()
@@ -160,6 +161,14 @@ func (c *Client) write() error {
 	}
 	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
 	return merr.Err()
+}
+
+func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
+	t := int64(model.Now())
+	for i := range tss {
+		tss[i].Samples[0].Timestamp = t
+	}
+	return tss
 }
 
 func collectMetrics() ([]prompb.TimeSeries, error) {
