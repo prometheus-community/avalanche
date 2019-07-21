@@ -3,6 +3,7 @@ module github.com/open-fresh/avalanche
 go 1.12
 
 require (
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/gogo/protobuf v1.2.1
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v0.0.1

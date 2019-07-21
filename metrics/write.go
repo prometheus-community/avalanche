@@ -32,7 +32,7 @@ type ConfigWrite struct {
 	URL             url.URL
 	RequestInterval time.Duration
 	BatchSize,
-	SamplesCount int
+	RequestCount int
 	UpdateNotify chan struct{}
 	PprofURLs    []*url.URL
 }
@@ -94,7 +94,7 @@ func (c *Client) write() error {
 
 	var (
 		totalTime       time.Duration
-		totalSamplesExp = len(tss) * c.config.SamplesCount
+		totalSamplesExp = len(tss) * c.config.RequestCount
 		totalSamplesAct int
 		mtx             sync.Mutex
 		wgMetrics       sync.WaitGroup
@@ -102,11 +102,11 @@ func (c *Client) write() error {
 		merr            = &errors.MultiError{}
 	)
 
-	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.SamplesCount, c.config.BatchSize, c.config.RequestInterval)
-	for ii := 0; ii < c.config.SamplesCount; ii++ {
+	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	for ii := 0; ii < c.config.RequestCount; ii++ {
 		// Download the pprofs during half of the iteration to get avarege readings.
 		// Do that only when it is not set to take profiles at a given interval.
-		if len(c.config.PprofURLs) > 0 && ii == c.config.SamplesCount/2 {
+		if len(c.config.PprofURLs) > 0 && ii == c.config.RequestCount/2 {
 			wgPprof.Add(1)
 			go func() {
 				download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
@@ -156,7 +156,7 @@ func (c *Client) write() error {
 		}
 	}
 	wgPprof.Wait()
-	if c.config.SamplesCount*len(tss) != totalSamplesAct {
+	if c.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
 	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
