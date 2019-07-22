@@ -6,16 +6,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/open-fresh/avalanche/pkg/download"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 
+	"github.com/open-fresh/avalanche/pkg/errors"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -23,23 +27,36 @@ const maxErrMsgLen = 256
 
 var userAgent = "avalanche"
 
-type Client struct {
-	url     *url.URL
-	client  *http.Client
-	timeout time.Duration
+// ConfigWrite for the remote write requests.
+type ConfigWrite struct {
+	URL             url.URL
+	RequestInterval time.Duration
+	BatchSize,
+	RequestCount int
+	UpdateNotify chan struct{}
+	PprofURLs    []*url.URL
 }
 
-func SendRemoteWrite(u url.URL) error {
+// Client for the remote write requests.
+type Client struct {
+	client  *http.Client
+	timeout time.Duration
+	config  ConfigWrite
+}
+
+// SendRemoteWrite initializes a http client and
+// sends metrics to a prometheus compatible remote endpoint.
+func SendRemoteWrite(config ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &cortexTenantRoundTripper{tenant: "0", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
-		url:     &u,
 		client:  httpClient,
 		timeout: time.Minute,
+		config:  config,
 	}
-	return c.Write()
+	return c.write()
 }
 
 // Add the tenant ID header required by Cortex
@@ -68,29 +85,100 @@ func cloneRequest(r *http.Request) *http.Request {
 	return r2
 }
 
-const maxSendSize = 1000
+func (c *Client) write() error {
 
-func (c *Client) Write() error {
-	metricFamilies, err := promRegistry.Gather()
+	tss, err := collectMetrics()
 	if err != nil {
 		return err
 	}
-	tss := ToTimeSeriesSlice(metricFamilies)
-	fmt.Printf("Sending %d timeseries\n", len(tss))
-	for i := 0; i < len(tss); i += maxSendSize {
-		end := i + maxSendSize
-		if end > len(tss) {
-			end = len(tss)
+
+	var (
+		totalTime       time.Duration
+		totalSamplesExp = len(tss) * c.config.RequestCount
+		totalSamplesAct int
+		mtx             sync.Mutex
+		wgMetrics       sync.WaitGroup
+		wgPprof         sync.WaitGroup
+		merr            = &errors.MultiError{}
+	)
+
+	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	for ii := 0; ii < c.config.RequestCount; ii++ {
+		// Download the pprofs during half of the iteration to get avarege readings.
+		// Do that only when it is not set to take profiles at a given interval.
+		if len(c.config.PprofURLs) > 0 && ii == c.config.RequestCount/2 {
+			wgPprof.Add(1)
+			go func() {
+				download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
+				wgPprof.Done()
+			}()
 		}
-		req := &prompb.WriteRequest{
-			Timeseries: tss[i:end],
+		time.Sleep(c.config.RequestInterval)
+		select {
+		case <-c.config.UpdateNotify:
+			log.Println("updating remote write metrics")
+			tss, err = collectMetrics()
+			if err != nil {
+				merr.Add(err)
+			}
+		default:
+			tss = updateTimetamps(tss)
 		}
-		err = c.Store(context.TODO(), req)
-		if err != nil {
-			return err
+
+		start := time.Now()
+		for i := 0; i < len(tss); i += c.config.BatchSize {
+			wgMetrics.Add(1)
+			go func(i int) {
+				defer wgMetrics.Done()
+				end := i + c.config.BatchSize
+				if end > len(tss) {
+					end = len(tss)
+				}
+				req := &prompb.WriteRequest{
+					Timeseries: tss[i:end],
+				}
+				err := c.Store(context.TODO(), req)
+				if err != nil {
+					merr.Add(err)
+					return
+				}
+				mtx.Lock()
+				totalSamplesAct += len(tss[i:end])
+				mtx.Unlock()
+
+			}(i)
+		}
+		wgMetrics.Wait()
+		totalTime += time.Since(start)
+		if merr.Count() > 20 {
+			merr.Add(fmt.Errorf("too many errors"))
+			return merr.Err()
 		}
 	}
-	return nil
+	wgPprof.Wait()
+	if c.config.RequestCount*len(tss) != totalSamplesAct {
+		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
+	}
+	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
+	return merr.Err()
+}
+
+func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
+	t := int64(model.Now())
+	for i := range tss {
+		tss[i].Samples[0].Timestamp = t
+	}
+	return tss
+}
+
+func collectMetrics() ([]prompb.TimeSeries, error) {
+	metricsMux.Lock()
+	defer metricsMux.Unlock()
+	metricFamilies, err := promRegistry.Gather()
+	if err != nil {
+		return nil, err
+	}
+	return ToTimeSeriesSlice(metricFamilies), nil
 }
 
 // ToTimeSeriesSlice converts a slice of metricFamilies containing samples into a slice of TimeSeries
@@ -149,7 +237,7 @@ func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
 	}
 
 	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(compressed))
+	httpReq, err := http.NewRequest("POST", c.config.URL.String(), bytes.NewReader(compressed))
 	if err != nil {
 		// Errors from NewRequest are from unparseable URLs, so are not
 		// recoverable.

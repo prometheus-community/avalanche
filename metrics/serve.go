@@ -20,8 +20,6 @@ var (
 )
 
 func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKeys []string) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	metrics = make([]*prometheus.GaugeVec, metricCount)
 	for idx := 0; idx < metricCount; idx++ {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -34,8 +32,6 @@ func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKe
 }
 
 func unregisterMetrics() {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		promRegistry.Unregister(metric)
 	}
@@ -55,8 +51,6 @@ func seriesLabels(seriesID int, cycleID int, labelKeys []string, labelValues []s
 }
 
 func deleteValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -66,8 +60,6 @@ func deleteValues(labelKeys []string, labelValues []string, seriesCount int, ser
 }
 
 func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -77,7 +69,7 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) error {
+func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -94,30 +86,49 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	valueTick := time.NewTicker(time.Duration(valueInterval) * time.Second)
 	seriesTick := time.NewTicker(time.Duration(seriesInterval) * time.Second)
 	metricTick := time.NewTicker(time.Duration(metricInterval) * time.Second)
+	updateNotify := make(chan struct{}, 1)
 
 	go func() {
 		for tick := range valueTick.C {
 			fmt.Printf("%v: refreshing metric values\n", tick)
+			metricsMux.Lock()
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
 	go func() {
 		for tick := range seriesTick.C {
 			fmt.Printf("%v: refreshing series cycle\n", tick)
+			metricsMux.Lock()
 			deleteValues(labelKeys, labelValues, seriesCount, seriesCycle)
 			seriesCycle++
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
 	go func() {
 		for tick := range metricTick.C {
 			fmt.Printf("%v: refreshing metric cycle\n", tick)
+			metricsMux.Lock()
 			metricCycle++
 			unregisterMetrics()
 			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			metricsMux.Unlock()
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
 		}
 	}()
 
@@ -128,7 +139,7 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 		metricTick.Stop()
 	}()
 
-	return nil
+	return updateNotify, nil
 }
 
 // ServeMetrics serves a prometheus metrics endpoint with test series
