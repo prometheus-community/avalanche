@@ -103,6 +103,8 @@ func (c *Client) write() error {
 	)
 
 	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	ticker := time.NewTicker(c.config.RequestInterval)
+	defer ticker.Stop()
 	for ii := 0; ii < c.config.RequestCount; ii++ {
 		// Download the pprofs during half of the iteration to get avarege readings.
 		// Do that only when it is not set to take profiles at a given interval.
@@ -113,7 +115,7 @@ func (c *Client) write() error {
 				wgPprof.Done()
 			}()
 		}
-		time.Sleep(c.config.RequestInterval)
+		<-ticker.C
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
