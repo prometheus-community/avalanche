@@ -29,6 +29,7 @@ var (
 	remoteBatchSize     = kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
 	remoteRequestCount  = kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
 	remoteReqsInterval  = kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
+	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
 )
 
 func main() {
@@ -58,6 +59,7 @@ func main() {
 			BatchSize:       *remoteBatchSize,
 			RequestCount:    *remoteRequestCount,
 			UpdateNotify:    updateNotify,
+			Tenant:          *remoteTenant,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
