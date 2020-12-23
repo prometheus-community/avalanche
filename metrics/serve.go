@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -69,7 +70,7 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, stop chan struct{}) (chan struct{}, error) {
+func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, constLabels []string, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -77,6 +78,14 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	labelValues := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelValues[idx] = fmt.Sprintf("label_val_%s_%v", strings.Repeat("v", labelLength), idx)
+	}
+	for _, cLabel := range constLabels {
+		split := strings.Split(cLabel, "=")
+		if len(split) != 2 {
+			return make(chan struct{}, 1), errors.New(fmt.Sprintf("Constant label argument must have format labelName=labelValue but got %s", cLabel))
+		}
+		labelKeys = append(labelKeys, split[0])
+		labelValues = append(labelValues, split[1])
 	}
 
 	metricCycle := 0
