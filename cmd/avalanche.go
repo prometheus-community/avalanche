@@ -19,6 +19,7 @@ var (
 	seriesCount         = kingpin.Flag("series-count", "Number of series per-metric.").Default("10").Int()
 	metricLength        = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
 	labelLength         = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
+	constLabels         = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
 	valueInterval       = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval       = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval      = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
@@ -40,7 +41,7 @@ func main() {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, stop)
+	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
 	}
