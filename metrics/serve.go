@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nelkinda/health-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -154,6 +155,8 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 // ServeMetrics serves a prometheus metrics endpoint with test series
 func ServeMetrics(port int) error {
 	http.Handle("/metrics", promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{}))
+	h := health.New(health.Health{})
+	http.HandleFunc("/health", h.Handler)
 	err := http.ListenAndServe(fmt.Sprintf(":%v", port), nil)
 	if err != nil {
 		return err

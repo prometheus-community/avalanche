@@ -19,6 +19,12 @@ avalanche --help
 docker run quay.io/freshtracks.io/avalanche --help
 ```
 
+## Endpoints
+
+Two endpoints are available :
+* `/metrics` - metrics endpoint
+* `/health` - healthcheck endpoint
+
 ## build and run go binary
 ```bash
 go get github.com/open-fresh/avalanche/cmd/...
