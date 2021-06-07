@@ -36,6 +36,7 @@ type ConfigWrite struct {
 	UpdateNotify chan struct{}
 	PprofURLs    []*url.URL
 	Tenant       string
+	Auth         string
 }
 
 // Client for the remote write requests.
@@ -49,7 +50,7 @@ type Client struct {
 // sends metrics to a prometheus compatible remote endpoint.
 func SendRemoteWrite(config ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{}
-	rt = &cortexTenantRoundTripper{tenant: config.Tenant, rt: rt}
+	rt = &cortexTenantRoundTripper{tenant: config.Tenant, auth: config.Auth, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
@@ -61,14 +62,17 @@ func SendRemoteWrite(config ConfigWrite) error {
 }
 
 // Add the tenant ID header required by Cortex
+// Add some auth headers if required
 func (rt *cortexTenantRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = cloneRequest(req)
 	req.Header.Set("X-Scope-OrgID", rt.tenant)
+	req.Header.Set("Authorization", rt.auth)
 	return rt.rt.RoundTrip(req)
 }
 
 type cortexTenantRoundTripper struct {
 	tenant string
+	auth   string
 	rt     http.RoundTripper
 }
 

@@ -31,6 +31,7 @@ var (
 	remoteRequestCount  = kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
 	remoteReqsInterval  = kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
 	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
+	remoteAuthHeader    = kingpin.Flag("remote-url-auth", "Authorization header to pass in for the remote-url").String()
 )
 
 func main() {
@@ -61,6 +62,7 @@ func main() {
 			RequestCount:    *remoteRequestCount,
 			UpdateNotify:    updateNotify,
 			Tenant:          *remoteTenant,
+			Auth:            *remoteAuthHeader,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
