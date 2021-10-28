@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,26 @@ import (
 	"github.com/open-fresh/avalanche/pkg/download"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
+
+type ignoredIntervals map[string]bool
+
+func (i ignoredIntervals) Set(value string) error {
+	fields := strings.Split(value, ",")
+	for _, f := range fields {
+		i[f] = true
+	}
+	return nil
+}
+
+func (i ignoredIntervals) String() string {
+	return ""
+}
+
+func IgnoredIntervals(s kingpin.Settings) (target map[string]bool) {
+	target = make(map[string]bool)
+	s.SetValue((ignoredIntervals)(target))
+	return
+}
 
 var (
 	metricCount         = kingpin.Flag("metric-count", "Number of metrics to serve.").Default("500").Int()
@@ -23,6 +44,7 @@ var (
 	valueInterval       = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval       = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval      = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
+	ignoredTimers       = IgnoredIntervals(kingpin.Flag("ignored-intervals", "Comma-separated list of intervals which should not be run"))
 	port                = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL           = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs     = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
@@ -41,7 +63,7 @@ func main() {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *constLabels, stop)
+	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, ignoredTimers, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
 	}

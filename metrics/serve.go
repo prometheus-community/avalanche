@@ -70,8 +70,18 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 	}
 }
 
+func maybeStartTicker(interval int, dontStart bool) (*time.Ticker, error) {
+	if dontStart {
+		t := time.NewTicker(time.Duration(1))
+		// Since a nil ticker can't actually be used, immediately stop it instead
+		t.Stop()
+		return t, nil
+	}
+	return time.NewTicker(time.Duration(interval) * time.Second), nil
+}
+
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, constLabels []string, stop chan struct{}) (chan struct{}, error) {
+func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, ignoredIntervals map[string]bool, constLabels []string, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -93,9 +103,19 @@ func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength i
 	seriesCycle := 0
 	registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 	cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
-	valueTick := time.NewTicker(time.Duration(valueInterval) * time.Second)
-	seriesTick := time.NewTicker(time.Duration(seriesInterval) * time.Second)
-	metricTick := time.NewTicker(time.Duration(metricInterval) * time.Second)
+
+	valueTick, err := maybeStartTicker(valueInterval, ignoredIntervals["value"])
+	if err != nil {
+		return make(chan struct{}, 1), err
+	}
+	seriesTick, err := maybeStartTicker(seriesInterval, ignoredIntervals["series"])
+	if err != nil {
+		return make(chan struct{}, 1), err
+	}
+	metricTick, err := maybeStartTicker(metricInterval, ignoredIntervals["metric"])
+	if err != nil {
+		return make(chan struct{}, 1), err
+	}
 	updateNotify := make(chan struct{}, 1)
 
 	go func() {
