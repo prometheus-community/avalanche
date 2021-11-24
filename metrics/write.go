@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -33,9 +34,10 @@ type ConfigWrite struct {
 	RequestInterval time.Duration
 	BatchSize,
 	RequestCount int
-	UpdateNotify chan struct{}
-	PprofURLs    []*url.URL
-	Tenant       string
+	UpdateNotify    chan struct{}
+	PprofURLs       []*url.URL
+	Tenant          string
+	TLSClientConfig tls.Config
 }
 
 // Client for the remote write requests.
@@ -48,7 +50,9 @@ type Client struct {
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
 func SendRemoteWrite(config ConfigWrite) error {
-	var rt http.RoundTripper = &http.Transport{}
+	var rt http.RoundTripper = &http.Transport{
+		TLSClientConfig: &config.TLSClientConfig,
+	}
 	rt = &cortexTenantRoundTripper{tenant: config.Tenant, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
