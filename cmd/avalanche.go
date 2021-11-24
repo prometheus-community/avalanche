@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"math/rand"
@@ -31,6 +32,7 @@ var (
 	remoteRequestCount  = kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
 	remoteReqsInterval  = kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
 	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
+	tlsClientInsecure   = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 )
 
 func main() {
@@ -61,6 +63,9 @@ func main() {
 			RequestCount:    *remoteRequestCount,
 			UpdateNotify:    updateNotify,
 			Tenant:          *remoteTenant,
+			TLSClientConfig: tls.Config{
+				InsecureSkipVerify: *tlsClientInsecure,
+			},
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
