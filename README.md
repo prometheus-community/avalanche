@@ -8,15 +8,16 @@ Metric names and unique series change over time to simulate series churn.
 
 Checkout the [blog post](https://blog.freshtracks.io/load-testing-prometheus-metric-ingestion-5b878711711c).
 
-## configuration flags 
-```bash 
+## configuration flags
+
+```bash
 avalanche --help
 ```
 
 ## run Docker image
 
 ```bash
-docker run quay.io/freshtracks.io/avalanche --help
+docker run quay.io/prometheuscommunity/avalanche --help
 ```
 
 ## Endpoints
@@ -26,7 +27,8 @@ Two endpoints are available :
 * `/health` - healthcheck endpoint
 
 ## build and run go binary
+
 ```bash
-go get github.com/open-fresh/avalanche/cmd/...
+go get github.com/prometheus-community/avalanche/cmd/...
 avalanche --help
 ```

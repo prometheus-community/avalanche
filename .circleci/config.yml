@@ -1,49 +1,55 @@
-version: 2
+---
+version: 2.1
+
+orbs:
+  prometheus: prometheus/prometheus@0.11.0
+
+executors:
+  # Whenever the Go version is updated here, .promu.yml should also be updated.
+  golang:
+    docker:
+      - image: circleci/golang:1.17
+
 jobs:
-  build:
-    docker:
-      - image: circleci/golang:1.15
-    steps:
-      - checkout
-      - setup_remote_docker
-      - run: make docker-build
+  test:
+    executor: golang
 
-  publish-latest:
-    docker:
-      - image: circleci/golang:1.15
     steps:
-      - checkout
-      - setup_remote_docker
-      - run: echo "${QUAY_PASSWORD}" | docker login -u "${QUAY_USERNAME}" --password-stdin quay.io
-      - run: make docker-publish
-      - run: DOCKER_TAG=latest make docker-publish
-
-  release:
-    docker:
-      - image: circleci/golang:1.15
-    steps:
-      - checkout
-      - setup_remote_docker
-      - run: echo "${QUAY_PASSWORD}" | docker login -u "${QUAY_USERNAME}" --password-stdin quay.io
-      - run: DOCKER_TAG=$CIRCLE_TAG make docker-publish
+      - prometheus/setup_environment
+      - run: make
+      - prometheus/store_artifact:
+          file: avalanche
+      - run: git diff --exit-code
 
 workflows:
   version: 2
-  build:
+  avalanche:
     jobs:
-      - build:
+      - test:
           filters:
-            # Tags filter is needed to run releases.
             tags:
-              only: /^v[0-9]+(\.[0-9]+){2}(-.+|[^-.]*)$/
-      - publish-latest:
+              only: /.*/
+      - prometheus/build:
+          name: build
+          filters:
+            tags:
+              only: /.*/
+      - prometheus/publish_main:
+          context: org-context
+          docker_hub_organization: prometheuscommunity
+          quay_io_organization: prometheuscommunity
           requires:
+            - test
             - build
           filters:
             branches:
-              only: master
-      - release:
+              only: main
+      - prometheus/publish_release:
+          context: org-context
+          docker_hub_organization: prometheuscommunity
+          quay_io_organization: prometheuscommunity
           requires:
+            - test
             - build
           filters:
             tags:

@@ -1,3 +1,16 @@
+// Copyright 2022 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -9,9 +22,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-fresh/avalanche/metrics"
-	"github.com/open-fresh/avalanche/pkg/download"
+	"github.com/prometheus/common/version"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/prometheus-community/avalanche/metrics"
+	"github.com/prometheus-community/avalanche/pkg/download"
 )
 
 var (
@@ -36,7 +51,7 @@ var (
 )
 
 func main() {
-	kingpin.Version("0.3")
+	kingpin.Version(version.Print("avalanche"))
 	log.SetFlags(log.Ltime | log.Lshortfile) // Show file name and line in logs.
 	kingpin.CommandLine.Help = "avalanche - metrics test server"
 	kingpin.Parse()
@@ -56,7 +71,7 @@ func main() {
 			log.Fatal("remote send batch size should be more than zero")
 		}
 
-		config := metrics.ConfigWrite{
+		config := &metrics.ConfigWrite{
 			URL:             **remoteURL,
 			RequestInterval: *remoteReqsInterval,
 			BatchSize:       *remoteBatchSize,
@@ -88,18 +103,16 @@ func main() {
 				var dur time.Duration
 			loop:
 				for {
+					<-ticker.C
 					select {
-					case <-ticker.C:
-						select {
-						case <-done: // Prevents a panic when calling wg.Add(1) after calling wg.Wait().
-							break loop
-						default:
-						}
-						dur += *remotePprofInterval
-						wg.Add(1)
-						download.URLs(*remotePprofURLs, strconv.Itoa(suffix)+"-"+dur.String())
-						wg.Done()
+					case <-done: // Prevents a panic when calling wg.Add(1) after calling wg.Wait().
+						break loop
+					default:
 					}
+					dur += *remotePprofInterval
+					wg.Add(1)
+					download.URLs(*remotePprofURLs, strconv.Itoa(suffix)+"-"+dur.String())
+					wg.Done()
 				}
 			}()
 

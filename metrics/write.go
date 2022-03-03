@@ -1,3 +1,16 @@
+// Copyright 2022 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package metrics
 
 import (
@@ -16,12 +29,14 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"github.com/open-fresh/avalanche/pkg/download"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 
-	"github.com/open-fresh/avalanche/pkg/errors"
+	"github.com/prometheus-community/avalanche/pkg/download"
+
 	dto "github.com/prometheus/client_model/go"
+
+	"github.com/prometheus-community/avalanche/pkg/errors"
 )
 
 const maxErrMsgLen = 256
@@ -44,12 +59,12 @@ type ConfigWrite struct {
 type Client struct {
 	client  *http.Client
 	timeout time.Duration
-	config  ConfigWrite
+	config  *ConfigWrite
 }
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(config ConfigWrite) error {
+func SendRemoteWrite(config *ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &config.TLSClientConfig,
 	}
@@ -91,7 +106,6 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write() error {
-
 	tss, err := collectMetrics()
 	if err != nil {
 		return err
@@ -152,7 +166,6 @@ func (c *Client) write() error {
 				mtx.Lock()
 				totalSamplesAct += len(tss[i:end])
 				mtx.Unlock()
-
 			}(i)
 		}
 		wgMetrics.Wait()
@@ -230,7 +243,7 @@ func prompbLabels(name string, label []*dto.LabelPair) []prompb.Label {
 			Value: *pair.Value,
 		})
 	}
-	sort.Slice(ret, func(i int, j int) bool {
+	sort.Slice(ret, func(i, j int) bool {
 		return ret[i].Name < ret[j].Name
 	})
 	return ret
