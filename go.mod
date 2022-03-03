@@ -1,4 +1,4 @@
-module github.com/open-fresh/avalanche
+module github.com/prometheus-community/avalanche
 
 go 1.14
 

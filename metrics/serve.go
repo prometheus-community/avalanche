@@ -1,7 +1,19 @@
+// Copyright 2022 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package metrics
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -21,7 +33,7 @@ var (
 	metricsMux   = &sync.Mutex{}
 )
 
-func registerMetrics(metricCount int, metricLength int, metricCycle int, labelKeys []string) {
+func registerMetrics(metricCount, metricLength, metricCycle int, labelKeys []string) {
 	metrics = make([]*prometheus.GaugeVec, metricCount)
 	for idx := 0; idx < metricCount; idx++ {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -39,7 +51,7 @@ func unregisterMetrics() {
 	}
 }
 
-func seriesLabels(seriesID int, cycleID int, labelKeys []string, labelValues []string) prometheus.Labels {
+func seriesLabels(seriesID, cycleID int, labelKeys, labelValues []string) prometheus.Labels {
 	labels := prometheus.Labels{
 		"series_id": fmt.Sprintf("%v", seriesID),
 		"cycle_id":  fmt.Sprintf("%v", cycleID),
@@ -52,7 +64,7 @@ func seriesLabels(seriesID int, cycleID int, labelKeys []string, labelValues []s
 	return labels
 }
 
-func deleteValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
+func deleteValues(labelKeys, labelValues []string, seriesCount, seriesCycle int) {
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -61,7 +73,7 @@ func deleteValues(labelKeys []string, labelValues []string, seriesCount int, ser
 	}
 }
 
-func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seriesCycle int) {
+func cycleValues(labelKeys, labelValues []string, seriesCount, seriesCycle int) {
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
@@ -71,19 +83,19 @@ func cycleValues(labelKeys []string, labelValues []string, seriesCount int, seri
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount int, labelCount int, seriesCount int, metricLength int, labelLength int, valueInterval int, seriesInterval int, metricInterval int, constLabels []string, stop chan struct{}) (chan struct{}, error) {
-	labelKeys := make([]string, labelCount, labelCount)
+func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval int, constLabels []string, stop chan struct{}) (chan struct{}, error) {
+	labelKeys := make([]string, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
 	}
-	labelValues := make([]string, labelCount, labelCount)
+	labelValues := make([]string, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelValues[idx] = fmt.Sprintf("label_val_%s_%v", strings.Repeat("v", labelLength), idx)
 	}
 	for _, cLabel := range constLabels {
 		split := strings.Split(cLabel, "=")
 		if len(split) != 2 {
-			return make(chan struct{}, 1), errors.New(fmt.Sprintf("Constant label argument must have format labelName=labelValue but got %s", cLabel))
+			return make(chan struct{}, 1), fmt.Errorf("Constant label argument must have format labelName=labelValue but got %s", cLabel)
 		}
 		labelKeys = append(labelKeys, split[0])
 		labelValues = append(labelValues, split[1])

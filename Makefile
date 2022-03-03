@@ -1,10 +1,9 @@
-DOCKER_REPO ?= quay.io/freshtracks.io/avalanche
-DOCKER_TAG ?= $(shell git rev-parse --abbrev-ref HEAD)-$(shell date -u +"%Y-%m-%d")-$(shell git rev-parse --short HEAD)
+# Ensure that 'all' is the default target otherwise it will be the first target from Makefile.common.
+all::
 
-.PHONY: docker-build
-docker-build:
-	docker build . -t $(DOCKER_REPO):$(DOCKER_TAG)
+# Needs to be defined before including Makefile.common to auto-generate targets
+DOCKER_REPO  ?= prometheuscommunity
 
-.PHONY: docker-publish
-docker-publish: docker-build
-	docker push $(DOCKER_REPO):$(DOCKER_TAG)
+include Makefile.common
+
+DOCKER_IMAGE_NAME       ?= avalanche
