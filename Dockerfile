@@ -1,9 +1,12 @@
-FROM golang:1.15 as build
-WORKDIR $GOPATH/avalanche
-COPY . .
-RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -o=/bin/avalanche ./cmd
+ARG ARCH="amd64"
+ARG OS="linux"
+FROM quay.io/prometheus/busybox-${OS}-${ARCH}:latest
+LABEL maintainer="The Prometheus Authors <prometheus-developers@googlegroups.com>"
 
-FROM scratch
-COPY --from=build /bin/avalanche /bin/avalanche
-EXPOSE 9001
-ENTRYPOINT ["/bin/avalanche"]
+ARG ARCH="amd64"
+ARG OS="linux"
+COPY .build/${OS}-${ARCH}/avalanche /bin/avalanche
+
+EXPOSE      9101
+USER        nobody
+ENTRYPOINT  [ "/bin/avalanche" ]
