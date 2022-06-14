@@ -1,26 +1,21 @@
 ---
 version: 2.1
-
 orbs:
-  prometheus: prometheus/prometheus@0.15.0
-
+  prometheus: prometheus/prometheus@0.16.0
 executors:
   # Whenever the Go version is updated here, .promu.yml should also be updated.
   golang:
     docker:
       - image: circleci/golang:1.17
-
 jobs:
   test:
     executor: golang
-
     steps:
       - prometheus/setup_environment
       - run: make
       - prometheus/store_artifact:
           file: avalanche
       - run: git diff --exit-code
-
 workflows:
   version: 2
   avalanche:
