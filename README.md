@@ -17,6 +17,7 @@ avalanche --help
 ## run Docker image
 
 ```bash
+docker pull quay.io/prometheuscommunity/avalanche:main
 docker run quay.io/prometheuscommunity/avalanche --help
 ```
 
