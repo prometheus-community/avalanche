@@ -69,7 +69,7 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &config.TLSClientConfig,
 	}
-	rt = &cortexTenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
+	rt = &tenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
