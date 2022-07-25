@@ -82,7 +82,7 @@ func main() {
 			TLSClientConfig: tls.Config{
 				InsecureSkipVerify: *tlsClientInsecure,
 			},
-			TenantHeader:    *remoteTenantHeader,
+			TenantHeader: *remoteTenantHeader,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
