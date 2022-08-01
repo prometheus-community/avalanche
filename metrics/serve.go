@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nelkinda/health-go"
+	health "github.com/nelkinda/health-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
