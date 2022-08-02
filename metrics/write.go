@@ -53,6 +53,7 @@ type ConfigWrite struct {
 	PprofURLs       []*url.URL
 	Tenant          string
 	TLSClientConfig tls.Config
+	TenantHeader    string
 }
 
 // Client for the remote write requests.
@@ -68,7 +69,7 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &config.TLSClientConfig,
 	}
-	rt = &cortexTenantRoundTripper{tenant: config.Tenant, rt: rt}
+	rt = &tenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
@@ -79,16 +80,17 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	return c.write()
 }
 
-// Add the tenant ID header required by Cortex
-func (rt *cortexTenantRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+// Add the tenant ID header
+func (rt *tenantRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = cloneRequest(req)
-	req.Header.Set("X-Scope-OrgID", rt.tenant)
+	req.Header.Set(rt.tenantHeader, rt.tenant)
 	return rt.rt.RoundTrip(req)
 }
 
-type cortexTenantRoundTripper struct {
-	tenant string
-	rt     http.RoundTripper
+type tenantRoundTripper struct {
+	tenant       string
+	tenantHeader string
+	rt           http.RoundTripper
 }
 
 // cloneRequest returns a clone of the provided *http.Request.
