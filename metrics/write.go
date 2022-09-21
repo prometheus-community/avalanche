@@ -54,6 +54,7 @@ type ConfigWrite struct {
 	Tenant          string
 	TLSClientConfig tls.Config
 	TenantHeader    string
+	Concurrency     int
 }
 
 // Client for the remote write requests.
@@ -126,6 +127,7 @@ func (c *Client) write() error {
 	log.Printf("Sending:  %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
 	ticker := time.NewTicker(c.config.RequestInterval)
 	defer ticker.Stop()
+	concurrencyLimitCh := make(chan struct{}, c.config.Concurrency)
 	for ii := 0; ii < c.config.RequestCount; ii++ {
 		// Download the pprofs during half of the iteration to get avarege readings.
 		// Do that only when it is not set to take profiles at a given interval.
@@ -151,7 +153,11 @@ func (c *Client) write() error {
 		start := time.Now()
 		for i := 0; i < len(tss); i += c.config.BatchSize {
 			wgMetrics.Add(1)
+			concurrencyLimitCh <- struct{}{}
 			go func(i int) {
+				defer func() {
+					<-concurrencyLimitCh
+				}()
 				defer wgMetrics.Done()
 				end := i + c.config.BatchSize
 				if end > len(tss) {
