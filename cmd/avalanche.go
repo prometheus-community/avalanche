@@ -31,10 +31,14 @@ import (
 
 var (
 	metricCount         = kingpin.Flag("metric-count", "Number of metrics to serve.").Default("500").Int()
+	histogramCount      = kingpin.Flag("histogram-count", "Number of histogram to serve.").Default("5").Int()
+	histogramValues     = kingpin.Flag("histogram-values", "Number of values per histogram.").Default("5").Int()
+	histogramBucket     = kingpin.Flag("histogram-bucket", "Max bucket size for histogram.").Default("10").Int()
 	labelCount          = kingpin.Flag("label-count", "Number of labels per-metric.").Default("10").Int()
 	seriesCount         = kingpin.Flag("series-count", "Number of series per-metric.").Default("10").Int()
 	metricLength        = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
 	labelLength         = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
+	typedName           = kingpin.Flag("typed-name", "Change the default metric name pattern to `avalanche_{metricType}`.").Default("false").Bool()
 	constLabels         = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
 	valueInterval       = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval       = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
@@ -59,7 +63,7 @@ func main() {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *constLabels, stop)
+	updateNotify, err := metrics.RunMetrics(*metricCount, *histogramCount, *histogramValues, *histogramBucket, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *typedName, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
 	}
