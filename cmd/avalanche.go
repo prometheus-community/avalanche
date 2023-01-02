@@ -63,7 +63,7 @@ func main() {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	typedNameBool,_ := strconv.ParseBool(*typedName)
+	typedNameBool, _ := strconv.ParseBool(*typedName)
 	updateNotify, err := metrics.RunMetrics(*metricCount, *histogramCount, *histogramValues, *histogramBucket, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, typedNameBool, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
