@@ -8,7 +8,7 @@ spec:
   - kubernetes
 ---
 #create deployment avalanche
-apiVersion: apps/v1 
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: avalanche
@@ -45,10 +45,10 @@ metadata:
     app: avalanche
 spec:
   ports:
-    # the port that this service should serve on
-    - port: 9001
-      targetPort: 9001
-      name: http-avalanche
+  # the port that this service should serve on
+  - port: 9001
+    targetPort: 9001
+    name: http-avalanche
   type: ClusterIP
   clusterIP: None
   # label keys and values that must match in order to receive traffic for this service
