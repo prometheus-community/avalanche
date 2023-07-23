@@ -19,6 +19,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,7 @@ var (
 	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
 	tlsClientInsecure   = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 	remoteTenantHeader  = kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
+	remoteCustomHeaders = kingpin.Flag("remote-custom-header", "Additional HTTP headers to include in remote_write send. Format is HeaderName:HeaderValue. Flag can be specified multiple times.").Strings()
 )
 
 func main() {
@@ -72,6 +74,11 @@ func main() {
 			log.Fatal("remote send batch size should be more than zero")
 		}
 
+		customHeaders, err := parseCustomHttpHeaders(*remoteCustomHeaders)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		config := &metrics.ConfigWrite{
 			URL:             **remoteURL,
 			RequestInterval: *remoteReqsInterval,
@@ -82,7 +89,8 @@ func main() {
 			TLSClientConfig: tls.Config{
 				InsecureSkipVerify: *tlsClientInsecure,
 			},
-			TenantHeader: *remoteTenantHeader,
+			TenantHeader:  *remoteTenantHeader,
+			CustomHeaders: customHeaders,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
@@ -120,7 +128,7 @@ func main() {
 
 		}
 		// First cut: just send the metrics once then exit
-		err := metrics.SendRemoteWrite(config)
+		err = metrics.SendRemoteWrite(config)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -136,4 +144,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func parseCustomHttpHeaders(headerTexts []string) (map[string]string, error) {
+	headers := map[string]string{}
+	for _, headerText := range headerTexts {
+		split := strings.SplitN(headerText, ":", 2)
+		if len(split) != 2 {
+			return nil, fmt.Errorf("remote header arguments must have format headerName:headerValue but got %v", split)
+		}
+		name := strings.TrimSpace(split[0])
+		value := strings.TrimSpace(split[1])
+		headers[name] = value
+	}
+	return headers, nil
 }
