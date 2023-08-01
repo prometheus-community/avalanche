@@ -54,6 +54,7 @@ type ConfigWrite struct {
 	Tenant          string
 	TLSClientConfig tls.Config
 	TenantHeader    string
+	CustomHeaders   map[string]string
 }
 
 // Client for the remote write requests.
@@ -69,7 +70,12 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &config.TLSClientConfig,
 	}
-	rt = &tenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
+	rt = &tenantRoundTripper{
+		tenant:        config.Tenant,
+		tenantHeader:  config.TenantHeader,
+		customHeaders: config.CustomHeaders,
+		rt:            rt,
+	}
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
@@ -80,17 +86,21 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	return c.write()
 }
 
-// Add the tenant ID header
+// Add the tenant ID header and custom headers
 func (rt *tenantRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = cloneRequest(req)
 	req.Header.Set(rt.tenantHeader, rt.tenant)
+	for name, value := range rt.customHeaders {
+		req.Header.Set(name, value)
+	}
 	return rt.rt.RoundTrip(req)
 }
 
 type tenantRoundTripper struct {
-	tenant       string
-	tenantHeader string
-	rt           http.RoundTripper
+	tenant        string
+	tenantHeader  string
+	customHeaders map[string]string
+	rt            http.RoundTripper
 }
 
 // cloneRequest returns a clone of the provided *http.Request.
