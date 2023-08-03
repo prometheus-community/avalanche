@@ -30,14 +30,22 @@ var (
 	promRegistry = prometheus.NewRegistry() // local Registry so we don't get Go metrics, etc.
 	valGenerator = rand.New(rand.NewSource(time.Now().UnixNano()))
 	metrics      = make([]*prometheus.GaugeVec, 0)
+	histograms   = make([]prometheus.Histogram, 0)
 	metricsMux   = &sync.Mutex{}
 )
 
-func registerMetrics(metricCount, metricLength, metricCycle int, labelKeys []string) {
+func buildMetricName(metricType string, typedName bool) string {
+	if !typedName {
+		return "avalanche_metric"
+	}
+	return fmt.Sprintf("avalanche_%v", metricType)
+}
+
+func registerMetrics(metricCount, metricLength, metricCycle int, labelKeys []string, typedName bool) {
 	metrics = make([]*prometheus.GaugeVec, metricCount)
 	for idx := 0; idx < metricCount; idx++ {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: fmt.Sprintf("avalanche_metric_%s_%v_%v", strings.Repeat("m", metricLength), metricCycle, idx),
+			Name: fmt.Sprintf("%s_%s_%v_%v", buildMetricName("gauge", typedName), strings.Repeat("m", metricLength), metricCycle, idx),
 			Help: "A tasty metric morsel",
 		}, append([]string{"series_id", "cycle_id"}, labelKeys...))
 		promRegistry.MustRegister(gauge)
@@ -48,6 +56,10 @@ func registerMetrics(metricCount, metricLength, metricCycle int, labelKeys []str
 func unregisterMetrics() {
 	for _, metric := range metrics {
 		promRegistry.Unregister(metric)
+	}
+
+	for _, histogram := range histograms {
+		promRegistry.Unregister(histogram)
 	}
 }
 
@@ -73,17 +85,37 @@ func deleteValues(labelKeys, labelValues []string, seriesCount, seriesCycle int)
 	}
 }
 
-func cycleValues(labelKeys, labelValues []string, seriesCount, seriesCycle int) {
+func cycleValues(histogramValues int, histogramBucket int, labelKeys, labelValues []string, seriesCount, seriesCycle int) {
 	for _, metric := range metrics {
 		for idx := 0; idx < seriesCount; idx++ {
 			labels := seriesLabels(idx, seriesCycle, labelKeys, labelValues)
 			metric.With(labels).Set(float64(valGenerator.Intn(100)))
 		}
 	}
+
+	for _, histogram := range histograms {
+		histogram.Observe(rand.Float64() * float64(histogramBucket))
+	}
+}
+
+func registerHistograms(histogramCount int, histogramBucket int, metricLength int, metricCycle int, typedName bool) {
+	buckets := make([]float64, histogramBucket+1)
+	for i := range buckets {
+		buckets[i] = float64(i)
+	}
+	for idx := 0; idx < histogramCount; idx++ {
+		histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    fmt.Sprintf("%s_%s_%v_%v", buildMetricName("histogram", typedName), strings.Repeat("h", metricLength), metricCycle, idx),
+			Help:    "A tasty histogram morsel",
+			Buckets: buckets,
+		})
+		promRegistry.MustRegister(histogram)
+		histograms = append(histograms, histogram)
+	}
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval int, constLabels []string, stop chan struct{}) (chan struct{}, error) {
+func RunMetrics(metricCount, histogramCount int, histogramValues int, histogramBucket int, labelCount, seriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval int, typedName bool, constLabels []string, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -103,8 +135,9 @@ func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength,
 
 	metricCycle := 0
 	seriesCycle := 0
-	registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-	cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+	registerHistograms(histogramCount, histogramBucket, metricLength, metricCycle, typedName)
+	registerMetrics(metricCount, metricLength, metricCycle, labelKeys, typedName)
+	cycleValues(histogramValues, histogramBucket, labelKeys, labelValues, seriesCount, seriesCycle)
 	valueTick := time.NewTicker(time.Duration(valueInterval) * time.Second)
 	seriesTick := time.NewTicker(time.Duration(seriesInterval) * time.Second)
 	metricTick := time.NewTicker(time.Duration(metricInterval) * time.Second)
@@ -114,7 +147,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength,
 		for tick := range valueTick.C {
 			fmt.Printf("%v: refreshing metric values\n", tick)
 			metricsMux.Lock()
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			cycleValues(histogramValues, histogramBucket, labelKeys, labelValues, seriesCount, seriesCycle)
 			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
@@ -129,7 +162,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength,
 			metricsMux.Lock()
 			deleteValues(labelKeys, labelValues, seriesCount, seriesCycle)
 			seriesCycle++
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			cycleValues(histogramValues, histogramBucket, labelKeys, labelValues, seriesCount, seriesCycle)
 			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
@@ -144,8 +177,9 @@ func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength,
 			metricsMux.Lock()
 			metricCycle++
 			unregisterMetrics()
-			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+			registerHistograms(histogramCount, histogramBucket, metricLength, metricCycle, typedName)
+			registerMetrics(metricCount, metricLength, metricCycle, labelKeys, typedName)
+			cycleValues(histogramValues, histogramBucket, labelKeys, labelValues, seriesCount, seriesCycle)
 			metricsMux.Unlock()
 			select {
 			case updateNotify <- struct{}{}:
