@@ -39,6 +39,7 @@ var (
 	valueInterval       = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval       = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval      = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
+	address             = kingpin.Flag("address", "Address to serve at").Default("").String()
 	port                = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL           = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs     = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
@@ -131,8 +132,8 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Serving ur metrics at localhost:%v/metrics\n", *port)
-	err = metrics.ServeMetrics(*port)
+	fmt.Printf("Serving ur metrics at %s:%v/metrics\n", *address, *port)
+	err = metrics.ServeMetrics(*address, *port)
 	if err != nil {
 		log.Fatal(err)
 	}

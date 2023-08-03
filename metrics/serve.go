@@ -165,11 +165,11 @@ func RunMetrics(metricCount, labelCount, seriesCount, metricLength, labelLength,
 }
 
 // ServeMetrics serves a prometheus metrics endpoint with test series
-func ServeMetrics(port int) error {
+func ServeMetrics(address string, port int) error {
 	http.Handle("/metrics", promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{}))
 	h := health.New(health.Health{})
 	http.HandleFunc("/health", h.Handler)
-	err := http.ListenAndServe(fmt.Sprintf(":%v", port), nil)
+	err := http.ListenAndServe(fmt.Sprintf("%s:%v", address, port), nil)
 	if err != nil {
 		return err
 	}
