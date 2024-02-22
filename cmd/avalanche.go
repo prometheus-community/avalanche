@@ -49,6 +49,7 @@ var (
 	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
 	tlsClientInsecure   = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 	remoteTenantHeader  = kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
+	clientTimeout       = kingpin.Flag("http-client-timeout", "Timeout config for http client in seconds. By default, is 60 seconds").Default("60s").Duration()
 )
 
 func main() {
@@ -82,7 +83,8 @@ func main() {
 			TLSClientConfig: tls.Config{
 				InsecureSkipVerify: *tlsClientInsecure,
 			},
-			TenantHeader: *remoteTenantHeader,
+			TenantHeader:  *remoteTenantHeader,
+			ClientTimeout: *clientTimeout,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.

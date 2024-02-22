@@ -54,13 +54,13 @@ type ConfigWrite struct {
 	Tenant          string
 	TLSClientConfig tls.Config
 	TenantHeader    string
+	ClientTimeout   time.Duration
 }
 
 // Client for the remote write requests.
 type Client struct {
-	client  *http.Client
-	timeout time.Duration
-	config  *ConfigWrite
+	client *http.Client
+	config *ConfigWrite
 }
 
 // SendRemoteWrite initializes a http client and
@@ -73,9 +73,8 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
-		client:  httpClient,
-		timeout: time.Minute,
-		config:  config,
+		client: httpClient,
+		config: config,
 	}
 	return c.write()
 }
@@ -271,7 +270,7 @@ func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 	httpReq = httpReq.WithContext(ctx)
 
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.ClientTimeout)
 	defer cancel()
 
 	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
