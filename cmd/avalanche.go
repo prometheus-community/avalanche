@@ -49,6 +49,7 @@ var (
 	remoteTenant        = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
 	tlsClientInsecure   = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 	remoteTenantHeader  = kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
+	outOfOrder          = kingpin.Flag("out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
 )
 
 func main() {
@@ -83,6 +84,7 @@ func main() {
 				InsecureSkipVerify: *tlsClientInsecure,
 			},
 			TenantHeader: *remoteTenantHeader,
+			OutOfOrder:   *outOfOrder,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
@@ -96,7 +98,7 @@ func main() {
 		)
 		if *remotePprofInterval > 0 {
 			if len(*remotePprofURLs) == 0 {
-				log.Fatal("remote profiling interval specified wihout any remote pprof urls")
+				log.Fatal("remote profiling interval specified without any remote pprof urls")
 			}
 			rand.Seed(time.Now().UnixNano())
 			suffix := rand.Intn(1000)
@@ -131,7 +133,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Serving ur metrics at localhost:%v/metrics\n", *port)
+	fmt.Printf("Serving your metrics at localhost:%v/metrics\n", *port)
 	err = metrics.ServeMetrics(*port)
 	if err != nil {
 		log.Fatal(err)

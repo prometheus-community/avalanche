@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"sort"
@@ -54,6 +55,7 @@ type ConfigWrite struct {
 	Tenant          string
 	TLSClientConfig tls.Config
 	TenantHeader    string
+	OutOfOrder      bool
 }
 
 // Client for the remote write requests.
@@ -108,7 +110,7 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write() error {
-	tss, err := collectMetrics()
+	tss, err := collectMetrics(c.config.OutOfOrder)
 	if err != nil {
 		return err
 	}
@@ -140,7 +142,7 @@ func (c *Client) write() error {
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics()
+			tss, err = collectMetrics(c.config.OutOfOrder)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -193,14 +195,24 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	return tss
 }
 
-func collectMetrics() ([]prompb.TimeSeries, error) {
+func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
 	metricsMux.Lock()
 	defer metricsMux.Unlock()
 	metricFamilies, err := promRegistry.Gather()
 	if err != nil {
 		return nil, err
 	}
-	return ToTimeSeriesSlice(metricFamilies), nil
+	tss := ToTimeSeriesSlice(metricFamilies)
+	if outOfOrder {
+		tss = shuffleTimestamps(tss)
+	}
+	return tss, nil
+}
+func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
+	rand.Shuffle(len(tss), func(i, j int) {
+		tss[i].Samples[0].Timestamp, tss[j].Samples[0].Timestamp = tss[j].Samples[0].Timestamp, tss[i].Samples[0].Timestamp
+	})
+	return tss
 }
 
 // ToTimeSeriesSlice converts a slice of metricFamilies containing samples into a slice of TimeSeries
