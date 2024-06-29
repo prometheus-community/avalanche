@@ -50,12 +50,13 @@ type ConfigWrite struct {
 	RequestInterval time.Duration
 	BatchSize,
 	RequestCount int
-	UpdateNotify    chan struct{}
-	PprofURLs       []*url.URL
-	Tenant          string
-	TLSClientConfig tls.Config
-	TenantHeader    string
-	OutOfOrder      bool
+	UpdateNotify     chan struct{}
+	PprofURLs        []*url.URL
+	Tenant           string
+	TLSClientConfig  tls.Config
+	TenantHeader     string
+	OutOfOrder       bool
+	OutOfOrderWindow time.Duration
 }
 
 // Client for the remote write requests.
@@ -110,7 +111,7 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write() error {
-	tss, err := collectMetrics(c.config.OutOfOrder)
+	tss, err := collectMetrics(c.config.OutOfOrder, c.config.OutOfOrderWindow)
 	if err != nil {
 		return err
 	}
@@ -142,7 +143,7 @@ func (c *Client) write() error {
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics(c.config.OutOfOrder)
+			tss, err = collectMetrics(c.config.OutOfOrder, c.config.OutOfOrderWindow)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -195,7 +196,7 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	return tss
 }
 
-func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
+func collectMetrics(outOfOrder bool, window time.Duration) ([]prompb.TimeSeries, error) {
 	metricsMux.Lock()
 	defer metricsMux.Unlock()
 	metricFamilies, err := promRegistry.Gather()
@@ -204,18 +205,21 @@ func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
 	}
 	tss := ToTimeSeriesSlice(metricFamilies)
 	if outOfOrder {
-		tss = shuffleTimestamps(tss)
+		tss = shuffleTimestamps(tss, window)
 	}
 	return tss, nil
 }
-func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
-	rand.Shuffle(len(tss), func(i, j int) {
-		tss[i].Samples[0].Timestamp, tss[j].Samples[0].Timestamp = tss[j].Samples[0].Timestamp, tss[i].Samples[0].Timestamp
-	})
+func shuffleTimestamps(tss []prompb.TimeSeries, window time.Duration) []prompb.TimeSeries {
+	now := time.Now().UnixMilli()
+	windowMillis := window.Milliseconds()
+
+	for i := range tss {
+		offset := rand.Int63n(windowMillis)
+		tss[i].Samples[0].Timestamp = now - offset
+	}
 	return tss
 }
 
-// ToTimeSeriesSlice converts a slice of metricFamilies containing samples into a slice of TimeSeries
 func ToTimeSeriesSlice(metricFamilies []*dto.MetricFamily) []prompb.TimeSeries {
 	tss := make([]prompb.TimeSeries, 0, len(metricFamilies)*10)
 	timestamp := int64(model.Now()) // Not using metric.TimestampMs because it is (always?) nil. Is this right?

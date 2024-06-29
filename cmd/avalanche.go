@@ -50,6 +50,7 @@ var (
 	tlsClientInsecure   = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 	remoteTenantHeader  = kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
 	outOfOrder          = kingpin.Flag("out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
+	outOfOrderWindow    = kingpin.Flag("out-of-order-window", "Time window for out-of-order samples (e.g., 5m, 10s)").Default("5m").Duration()
 )
 
 func main() {
@@ -83,8 +84,9 @@ func main() {
 			TLSClientConfig: tls.Config{
 				InsecureSkipVerify: *tlsClientInsecure,
 			},
-			TenantHeader: *remoteTenantHeader,
-			OutOfOrder:   *outOfOrder,
+			TenantHeader:     *remoteTenantHeader,
+			OutOfOrder:       *outOfOrder,
+			OutOfOrderWindow: *outOfOrderWindow,
 		}
 
 		// Collect Pprof during the write only if not collecting within a regular interval.
