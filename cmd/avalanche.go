@@ -41,7 +41,7 @@ var (
 	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
 	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds.").Default("10").Int()
-	operationMode        = kingpin.Flag("operation-mode", "Mode of operation: 'gradual-change', 'series-spike', 'double-halve'").Default("gradual-change").String()
+	operationMode        = kingpin.Flag("operation-mode", "Mode of operation: 'gradual-change', 'series-spike', 'double-halve'").Default("default").String()
 	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs      = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()

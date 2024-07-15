@@ -184,6 +184,28 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 				}
 			}
 		}()
+
+	case "gradual-change":
+		go func() {
+			for tick := range changeSeriesTick.C {
+				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, seriesCount)
+				metricsMux.Lock()
+				seriesCount += seriesChangeRate
+				if seriesCount < 1 {
+					seriesCount = 1
+				}
+				unregisterMetrics()
+				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				metricsMux.Unlock()
+
+				select {
+				case updateNotify <- struct{}{}:
+				default:
+				}
+			}
+		}()
+	default:
 	}
 
 	go func() {
