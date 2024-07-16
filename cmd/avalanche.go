@@ -102,7 +102,6 @@ func main() {
 			if len(*remotePprofURLs) == 0 {
 				log.Fatal("remote profiling interval specified without any remote pprof urls")
 			}
-			rand.Seed(time.Now().UnixNano())
 			suffix := rand.Intn(1000)
 			go func() {
 				ticker := time.NewTicker(*remotePprofInterval)
