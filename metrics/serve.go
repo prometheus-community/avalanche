@@ -83,7 +83,7 @@ func cycleValues(labelKeys, labelValues []string, seriesCount, seriesCycle int) 
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval int, operationMode string, constLabels []string, stop chan struct{}) (chan struct{}, error) {
+func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval int, seriesOperationMode string, constLabels []string, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -139,22 +139,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 		}
 	}()
 
-	go func() {
-		for tick := range metricTick.C {
-			fmt.Printf("%v: refreshing metric cycle\n", tick)
-			metricsMux.Lock()
-			metricCycle++
-			unregisterMetrics()
-			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
-			metricsMux.Unlock()
-			select {
-			case updateNotify <- struct{}{}:
-			default:
-			}
-		}
-	}()
-	switch operationMode {
+	switch seriesOperationMode {
 	case "double-halve":
 		seriesIncrease := true
 		go func() {
@@ -162,6 +147,10 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, seriesCount)
 
 				metricsMux.Lock()
+				unregisterMetrics()
+				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				metricsMux.Unlock()
 
 				if seriesIncrease {
 					seriesCount *= 2
@@ -172,11 +161,6 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 					}
 				}
 
-				unregisterMetrics()
-				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
-				metricsMux.Unlock()
-
 				seriesIncrease = !seriesIncrease
 				select {
 				case updateNotify <- struct{}{}:
@@ -186,26 +170,58 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 		}()
 
 	case "gradual-change":
+		if minSeriesCount >= maxSeriesCount {
+			fmt.Printf("Error: minSeriesCount must be less than maxSeriesCount, got %d and %d\n", minSeriesCount, maxSeriesCount)
+			close(stop)
+		}
+
 		go func() {
+			seriesIncrease := true
+			currentSeriesCount := minSeriesCount
 			for tick := range changeSeriesTick.C {
-				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, seriesCount)
+				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
 				metricsMux.Lock()
-				seriesCount += seriesChangeRate
-				if seriesCount < 1 {
-					seriesCount = 1
-				}
 				unregisterMetrics()
 				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 				metricsMux.Unlock()
 
+				if seriesIncrease {
+					currentSeriesCount += seriesChangeRate
+					if currentSeriesCount >= maxSeriesCount {
+						currentSeriesCount = maxSeriesCount
+						seriesIncrease = false
+					}
+				} else {
+					currentSeriesCount -= seriesChangeRate
+					if currentSeriesCount <= minSeriesCount {
+						currentSeriesCount = minSeriesCount
+						seriesIncrease = true
+					}
+				}
 				select {
 				case updateNotify <- struct{}{}:
 				default:
 				}
 			}
 		}()
+
 	default:
+		go func() {
+			for tick := range metricTick.C {
+				fmt.Printf("%v: refreshing metric cycle\n", tick)
+				metricsMux.Lock()
+				metricCycle++
+				unregisterMetrics()
+				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				metricsMux.Unlock()
+				select {
+				case updateNotify <- struct{}{}:
+				default:
+				}
+			}
+		}()
 	}
 
 	go func() {
@@ -213,6 +229,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, metricLe
 		valueTick.Stop()
 		seriesTick.Stop()
 		metricTick.Stop()
+		changeSeriesTick.Stop()
 	}()
 
 	return updateNotify, nil
