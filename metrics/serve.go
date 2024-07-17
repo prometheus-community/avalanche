@@ -146,8 +146,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 
 	case "gradual-change":
 		if minSeriesCount >= maxSeriesCount {
-			fmt.Printf("Error: minSeriesCount must be less than maxSeriesCount, got %d and %d\n", minSeriesCount, maxSeriesCount)
-			close(stop)
+			return nil, fmt.Errorf("error: minSeriesCount must be less than maxSeriesCount, got %d and %d", minSeriesCount, maxSeriesCount)
 		}
 		seriesIncrease := true
 		currentSeriesCount = minSeriesCount
@@ -183,6 +182,8 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 		}()
 	default:
 		currentSeriesCount = seriesCount
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
 		go func() {
 			for tick := range metricTick.C {
 				metricsMux.Lock()
