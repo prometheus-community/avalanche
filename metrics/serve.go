@@ -103,65 +103,40 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 
 	metricCycle := 0
 	seriesCycle := 0
-	registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-	cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
 	valueTick := time.NewTicker(time.Duration(valueInterval) * time.Second)
 	seriesTick := time.NewTicker(time.Duration(seriesInterval) * time.Second)
 	metricTick := time.NewTicker(time.Duration(metricInterval) * time.Second)
 	changeSeriesTick := time.NewTicker(time.Duration(seriesChangeInterval) * time.Second)
 	updateNotify := make(chan struct{}, 1)
 
-	go func() {
-		for tick := range valueTick.C {
-			fmt.Printf("%v: refreshing metric values\n", tick)
-			metricsMux.Lock()
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
-			metricsMux.Unlock()
-			select {
-			case updateNotify <- struct{}{}:
-			default:
-			}
-		}
-	}()
-
-	go func() {
-		for tick := range seriesTick.C {
-			fmt.Printf("%v: refreshing series cycle\n", tick)
-			metricsMux.Lock()
-			deleteValues(labelKeys, labelValues, seriesCount, seriesCycle)
-			seriesCycle++
-			cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
-			metricsMux.Unlock()
-			select {
-			case updateNotify <- struct{}{}:
-			default:
-			}
-		}
-	}()
+	var currentSeriesCount int
 
 	switch seriesOperationMode {
 	case "double-halve":
+		currentSeriesCount = seriesCount
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 		seriesIncrease := true
 		go func() {
 			for tick := range changeSeriesTick.C {
-				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, seriesCount)
-
 				metricsMux.Lock()
 				unregisterMetrics()
 				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 				metricsMux.Unlock()
-
 				if seriesIncrease {
-					seriesCount *= 2
+					currentSeriesCount *= 2
 				} else {
-					seriesCount /= 2
-					if seriesCount < 1 {
-						seriesCount = 1
+					currentSeriesCount /= 2
+					if currentSeriesCount < 1 {
+						currentSeriesCount = 1
 					}
 				}
 
+				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
+
 				seriesIncrease = !seriesIncrease
+
 				select {
 				case updateNotify <- struct{}{}:
 				default:
@@ -174,18 +149,17 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 			fmt.Printf("Error: minSeriesCount must be less than maxSeriesCount, got %d and %d\n", minSeriesCount, maxSeriesCount)
 			close(stop)
 		}
-
+		seriesIncrease := true
+		currentSeriesCount = minSeriesCount
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 		go func() {
-			seriesIncrease := true
-			currentSeriesCount := minSeriesCount
 			for tick := range changeSeriesTick.C {
-				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
 				metricsMux.Lock()
 				unregisterMetrics()
 				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 				cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 				metricsMux.Unlock()
-
 				if seriesIncrease {
 					currentSeriesCount += seriesChangeRate
 					if currentSeriesCount >= maxSeriesCount {
@@ -199,23 +173,26 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 						seriesIncrease = true
 					}
 				}
+				fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
+
 				select {
 				case updateNotify <- struct{}{}:
 				default:
 				}
 			}
 		}()
-
 	default:
+		currentSeriesCount = seriesCount
 		go func() {
 			for tick := range metricTick.C {
-				fmt.Printf("%v: refreshing metric cycle\n", tick)
 				metricsMux.Lock()
+				fmt.Printf("%v: refreshing metric cycle\n", tick)
 				metricCycle++
 				unregisterMetrics()
 				registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-				cycleValues(labelKeys, labelValues, seriesCount, seriesCycle)
+				cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
 				metricsMux.Unlock()
+
 				select {
 				case updateNotify <- struct{}{}:
 				default:
@@ -223,6 +200,36 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 			}
 		}()
 	}
+
+	go func() {
+		for tick := range valueTick.C {
+			metricsMux.Lock()
+			fmt.Printf("%v: refreshing metric values\n", tick)
+			cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+			metricsMux.Unlock()
+
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
+	go func() {
+		for tick := range seriesTick.C {
+			metricsMux.Lock()
+			fmt.Printf("%v: refreshing series cycle\n", tick)
+			deleteValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+			seriesCycle++
+			cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+			metricsMux.Unlock()
+
+			select {
+			case updateNotify <- struct{}{}:
+			default:
+			}
+		}
+	}()
 
 	go func() {
 		<-stop
@@ -233,6 +240,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 	}()
 
 	return updateNotify, nil
+
 }
 
 // ServeMetrics serves a prometheus metrics endpoint with test series

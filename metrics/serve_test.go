@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 
 	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, operationMode, []string{constLabel}, stop)
 	assert.NoError(t, err)
-
+	time.Sleep(2 * time.Second)
 	for i := 0; i < 4; i++ {
 		time.Sleep(time.Duration(seriesChangeInterval) * time.Second)
 		if i%2 == 0 { // Expecting halved series count
@@ -64,22 +65,20 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 }
 func TestRunMetricsGradualChange(t *testing.T) {
 	const (
-		metricCount           = 1
-		labelCount            = 1
-		seriesCount           = 100
-		maxSeriesCount        = 30
-		minSeriesCount        = 10
-		seriesChangeRate      = 10
-		metricLength          = 1
-		labelLength           = 1
-		valueInterval         = 100
-		seriesInterval        = 100
-		metricInterval        = 100
-		seriesChangeInterval  = 3
-		operationMode         = "gradual-change"
-		constLabel            = "constLabel=test"
-		updateNotifyTimeout   = 5 * time.Second
-		waitTimeBetweenChecks = 40 * time.Second
+		metricCount          = 1
+		labelCount           = 1
+		seriesCount          = 100
+		maxSeriesCount       = 30
+		minSeriesCount       = 10
+		seriesChangeRate     = 10
+		metricLength         = 1
+		labelLength          = 1
+		valueInterval        = 100
+		seriesInterval       = 100
+		metricInterval       = 100
+		seriesChangeInterval = 3
+		operationMode        = "gradual-change"
+		constLabel           = "constLabel=test"
 	)
 
 	stop := make(chan struct{})
@@ -90,18 +89,28 @@ func TestRunMetricsGradualChange(t *testing.T) {
 	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, operationMode, []string{constLabel}, stop)
 	assert.NoError(t, err)
 
-	time.Sleep(time.Duration(seriesChangeInterval) * time.Second)
+	time.Sleep(2 * time.Second)
 	initialCount := countSeries(t, promRegistry)
 	expectedInitialCount := minSeriesCount
 	assert.Equal(t, expectedInitialCount, initialCount, "Initial series count should be minSeriesCount %d but got %d", expectedInitialCount, initialCount)
 
 	assert.Eventually(t, func() bool {
 		graduallyIncreasedCount := countSeries(t, promRegistry)
+		fmt.Println("seriesCount: ", graduallyIncreasedCount)
 		if graduallyIncreasedCount > maxSeriesCount {
 			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", maxSeriesCount, graduallyIncreasedCount)
 		}
-		result := assert.Equal(t, maxSeriesCount, graduallyIncreasedCount, "Gradually increased series count should be max %d but got %d", maxSeriesCount, graduallyIncreasedCount)
-		return result
-	}, waitTimeBetweenChecks, seriesChangeInterval*time.Second, "Did not receive update notification for series count gradual increase in time")
 
+		return graduallyIncreasedCount == maxSeriesCount
+	}, 15*time.Second, seriesChangeInterval*time.Second, "Did not receive update notification for series count gradual increase in time")
+
+	assert.Eventually(t, func() bool {
+		graduallyIncreasedCount := countSeries(t, promRegistry)
+		fmt.Println("seriesCount: ", graduallyIncreasedCount)
+		if graduallyIncreasedCount < minSeriesCount {
+			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", maxSeriesCount, graduallyIncreasedCount)
+		}
+
+		return graduallyIncreasedCount == minSeriesCount
+	}, 15*time.Second, seriesChangeInterval*time.Second, "Did not receive update notification for series count gradual increase in time")
 }
