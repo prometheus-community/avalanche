@@ -36,7 +36,7 @@ var (
 	seriesCount          = kingpin.Flag("series-count", "Number of series per-metric.").Default("10").Int()
 	seriesChangeRate     = kingpin.Flag("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' modes.").Default("10").Int()
 	maxSeriesCount       = kingpin.Flag("max-series-count", "Maximum number of series to serve. Applies to 'gradual-change' modes.").Default("10000").Int()
-	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' modes.").Default("０").Int()
+	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' modes.").Default("0").Int()
 	metricLength         = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
 	labelLength          = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
 	constLabels          = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
@@ -44,7 +44,7 @@ var (
 	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
 	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds.").Default("10").Int()
-	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'spike', 'double-halve'").Default("default").String()
+	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve'").Default("default").String()
 	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs      = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
@@ -61,6 +61,21 @@ func main() {
 	kingpin.Version(version.Print("avalanche"))
 	log.SetFlags(log.Ltime | log.Lshortfile) // Show file name and line in logs.
 	kingpin.CommandLine.Help = "avalanche - metrics test server"
+	kingpin.CommandLine.Help = "avalanche - metrics test server\n" +
+		"\nSeries Operation Modes:\n" +
+		"  double-halve:\n" +
+		"    Alternately doubles and halves the series count at regular intervals.\n" +
+		"    Usage: ./avalanche --operation-mode=double-halve --series-change-interval=30 --series-count=20\n" +
+		"    Description: This mode alternately doubles and halves the series count at regular intervals.\n" +
+		"                 The series count is doubled on one tick and halved on the next, ensuring it never drops below 1.\n" +
+		"\n" +
+		"  gradual-change:\n" +
+		"    Gradually changes the series count by a fixed rate at regular intervals.\n" +
+		"    Usage: ./avalanche --operation-mode=gradual-change --series-change-interval=30 --series-change-rate=10 --series-count=20\n" +
+		"    Description: This mode gradually increases the series count by seriesChangeRate on each tick up to maxSeriesCount,\n" +
+		"                 then decreases it back to the starting value, and repeats this cycle indefinitely.\n" +
+		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1."
+
 	kingpin.Parse()
 	if *maxSeriesCount <= *minSeriesCount {
 		fmt.Fprintf(os.Stderr, "Error: --max-series-count (%d) must be greater than --min-series-count (%d)\n", *maxSeriesCount, *minSeriesCount)
