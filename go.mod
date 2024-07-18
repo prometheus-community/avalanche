@@ -1,10 +1,14 @@
 module github.com/prometheus-community/avalanche
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 go 1.21
 =======
 go 1.17
 >>>>>>> de8e525 (Add series doubling and halving functionality)
+=======
+go 1.21
+>>>>>>> a76a4e6 (fix go version to 1.21, fix flag help text)
 
 require (
 	github.com/gogo/protobuf v1.3.2

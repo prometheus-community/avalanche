@@ -34,16 +34,16 @@ var (
 	metricCount          = kingpin.Flag("metric-count", "Number of metrics to serve.").Default("500").Int()
 	labelCount           = kingpin.Flag("label-count", "Number of labels per-metric.").Default("10").Int()
 	seriesCount          = kingpin.Flag("series-count", "Number of series per-metric.").Default("10").Int()
-	seriesChangeRate     = kingpin.Flag("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' modes.").Default("10").Int()
-	maxSeriesCount       = kingpin.Flag("max-series-count", "Maximum number of series to serve. Applies to 'gradual-change' modes.").Default("10000").Int()
-	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' modes.").Default("0").Int()
+	seriesChangeRate     = kingpin.Flag("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' mode.").Default("10").Int()
+	maxSeriesCount       = kingpin.Flag("max-series-count", "Maximum number of series to serve. Applies to 'gradual-change' mode.").Default("10000").Int()
+	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' mode.").Default("0").Int()
 	metricLength         = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
 	labelLength          = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
 	constLabels          = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
 	valueInterval        = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
-	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds.").Default("10").Int()
+	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change' and 'double-halve' modes.").Default("10").Int()
 	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve'").Default("default").String()
 	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
@@ -60,7 +60,6 @@ var (
 func main() {
 	kingpin.Version(version.Print("avalanche"))
 	log.SetFlags(log.Ltime | log.Lshortfile) // Show file name and line in logs.
-	kingpin.CommandLine.Help = "avalanche - metrics test server"
 	kingpin.CommandLine.Help = "avalanche - metrics test server\n" +
 		"\nSeries Operation Modes:\n" +
 		"  double-halve:\n" +
