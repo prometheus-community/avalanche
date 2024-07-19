@@ -160,55 +160,46 @@ func changeSeriesDoubleHalve(currentSeriesCount *int, seriesIncrease *bool) {
 func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesCount int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
 	currentSeriesCount := seriesCount
 	seriesIncrease := true
+	for tick := range changeSeriesTick.C {
+		metricsMux.Lock()
+		unregisterMetrics()
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+		metricsMux.Unlock()
 
-	registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-	cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+		changeSeriesDoubleHalve(&currentSeriesCount, &seriesIncrease)
 
-	go func() {
-		for tick := range changeSeriesTick.C {
-			metricsMux.Lock()
-			unregisterMetrics()
-			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-			cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
-			metricsMux.Unlock()
+		fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
 
-			changeSeriesDoubleHalve(&currentSeriesCount, &seriesIncrease)
-
-			fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
-
-			select {
-			case updateNotify <- struct{}{}:
-			default:
-			}
+		select {
+		case updateNotify <- struct{}{}:
+		default:
 		}
-	}()
+	}
+
 }
 
 func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, maxSeriesCount, minSeriesCount int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
 	currentSeriesCount := minSeriesCount
 	seriesIncrease := true
 
-	registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-	cycleValues(labelKeys, labelValues, minSeriesCount, seriesCycle)
+	for tick := range changeSeriesTick.C {
+		metricsMux.Lock()
+		unregisterMetrics()
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+		metricsMux.Unlock()
 
-	go func() {
-		for tick := range changeSeriesTick.C {
-			metricsMux.Lock()
-			unregisterMetrics()
-			registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-			cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
-			metricsMux.Unlock()
+		changeSeriesGradual(&seriesChangeRate, &maxSeriesCount, &minSeriesCount, &currentSeriesCount, &seriesIncrease)
 
-			changeSeriesGradual(&seriesChangeRate, &maxSeriesCount, &minSeriesCount, &currentSeriesCount, &seriesIncrease)
+		fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
 
-			fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, currentSeriesCount)
-
-			select {
-			case updateNotify <- struct{}{}:
-			default:
-			}
+		select {
+		case updateNotify <- struct{}{}:
+		default:
 		}
-	}()
+	}
+
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
@@ -242,7 +233,9 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 
 	switch seriesOperationMode {
 	case "double-halve":
-		handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesCount, changeSeriesTick, updateNotify)
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+		go handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesCount, changeSeriesTick, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
@@ -250,7 +243,9 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 		if minSeriesCount >= maxSeriesCount {
 			return nil, fmt.Errorf("error: minSeriesCount must be less than maxSeriesCount, got %d and %d", minSeriesCount, maxSeriesCount)
 		}
-		handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesChangeRate, maxSeriesCount, minSeriesCount, changeSeriesTick, updateNotify)
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, minSeriesCount, seriesCycle)
+		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesChangeRate, maxSeriesCount, minSeriesCount, changeSeriesTick, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
