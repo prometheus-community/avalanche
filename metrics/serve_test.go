@@ -76,6 +76,7 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 		}
 	}
 }
+
 func TestRunMetricsGradualChange(t *testing.T) {
 	const (
 		metricCount          = 1
