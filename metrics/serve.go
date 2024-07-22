@@ -94,7 +94,6 @@ func handleValueTicks(labelKeys, labelValues *[]string, currentSeriesCount, seri
 		default:
 		}
 	}
-
 }
 
 func handleSeriesTicks(labelKeys, labelValues *[]string, currentSeriesCount, seriesCycle *int, updateNotify chan struct{}, seriesTick *time.Ticker) {
@@ -111,7 +110,6 @@ func handleSeriesTicks(labelKeys, labelValues *[]string, currentSeriesCount, ser
 		default:
 		}
 	}
-
 }
 
 func handleMetricTicks(metricCount, metricLength, metricCycle *int, labelKeys *[]string, updateNotify chan struct{}, metricTick *time.Ticker) {
@@ -176,7 +174,6 @@ func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle i
 		default:
 		}
 	}
-
 }
 
 func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, maxSeriesCount, minSeriesCount int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
@@ -199,7 +196,6 @@ func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle
 		default:
 		}
 	}
-
 }
 
 // RunMetrics creates a set of Prometheus test series that update over time
@@ -267,7 +263,6 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 	}()
 
 	return updateNotify, nil
-
 }
 
 // ServeMetrics serves a prometheus metrics endpoint with test series
