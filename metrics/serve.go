@@ -176,20 +176,20 @@ func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle i
 	}
 }
 
-func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, maxSeriesCount, minSeriesCount int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
-	currentSeriesCount := &minSeriesCount
+func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, maxSeriesCount, minSeriesCount int, seriesCount *int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
+	*seriesCount = minSeriesCount
 	seriesIncrease := true
 
 	for tick := range changeSeriesTick.C {
 		metricsMux.Lock()
 		unregisterMetrics()
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
-		cycleValues(labelKeys, labelValues, *currentSeriesCount, seriesCycle)
+		cycleValues(labelKeys, labelValues, *seriesCount, seriesCycle)
 		metricsMux.Unlock()
 
-		changeSeriesGradual(&seriesChangeRate, &maxSeriesCount, &minSeriesCount, currentSeriesCount, &seriesIncrease)
+		changeSeriesGradual(&seriesChangeRate, &maxSeriesCount, &minSeriesCount, seriesCount, &seriesIncrease)
 
-		fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, *currentSeriesCount)
+		fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, *seriesCount)
 
 		select {
 		case updateNotify <- struct{}{}:
@@ -241,7 +241,7 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 		}
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 		cycleValues(labelKeys, labelValues, minSeriesCount, seriesCycle)
-		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesChangeRate, maxSeriesCount, minSeriesCount, changeSeriesTick, updateNotify)
+		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesChangeRate, maxSeriesCount, minSeriesCount, &currentSeriesCount, changeSeriesTick, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
