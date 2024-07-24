@@ -156,9 +156,9 @@ func changeSeriesDoubleHalve(currentSeriesCount *int, seriesIncrease *bool) {
 	*seriesIncrease = !*seriesIncrease
 }
 
-func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, currentSeriesCount *int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
+func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, currentSeriesCount *int, changeSeriesChan <-chan time.Time, updateNotify chan struct{}) {
 	seriesIncrease := true
-	for tick := range changeSeriesTick.C {
+	for tick := range changeSeriesChan {
 		metricsMux.Lock()
 		unregisterMetrics()
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
@@ -176,11 +176,11 @@ func handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle i
 	}
 }
 
-func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, maxSeriesCount, minSeriesCount int, seriesCount *int, changeSeriesTick *time.Ticker, updateNotify chan struct{}) {
+func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, seriesChangeRate, minSeriesCount, maxSeriesCount int, seriesCount *int, changeSeriesChan <-chan time.Time, updateNotify chan struct{}) {
 	*seriesCount = minSeriesCount
 	seriesIncrease := true
 
-	for tick := range changeSeriesTick.C {
+	for tick := range changeSeriesChan {
 		metricsMux.Lock()
 		unregisterMetrics()
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
@@ -231,7 +231,8 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 	case "double-halve":
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
-		go handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, &currentSeriesCount, changeSeriesTick, updateNotify)
+		fmt.Printf("Starting double-halve mode; starting series: %d, change series interval: %d seconds\n", currentSeriesCount, seriesChangeInterval)
+		go handleDoubleHalveMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, &currentSeriesCount, changeSeriesTick.C, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
@@ -239,9 +240,12 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 		if minSeriesCount >= maxSeriesCount {
 			return nil, fmt.Errorf("error: minSeriesCount must be less than maxSeriesCount, got %d and %d", minSeriesCount, maxSeriesCount)
 		}
+		fmt.Printf("Starting gradual-change mode; min series: %d, max series: %d, series change rate: %d, change series interval: %d seconds\n", minSeriesCount, maxSeriesCount, seriesChangeRate, seriesChangeInterval)
+
 		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
 		cycleValues(labelKeys, labelValues, minSeriesCount, seriesCycle)
-		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, seriesChangeRate, maxSeriesCount, minSeriesCount, &currentSeriesCount, changeSeriesTick, updateNotify)
+		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues,
+			seriesChangeRate, minSeriesCount, maxSeriesCount, &currentSeriesCount, changeSeriesTick.C, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
