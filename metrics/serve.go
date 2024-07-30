@@ -198,8 +198,35 @@ func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle
 	}
 }
 
+func handleSpikeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, currentSeriesCount *int, spikeMultiplier float64, changeSeriesChan <-chan time.Time, updateNotify chan struct{}) {
+	inSpike := false
+	initialSeriesCount := *currentSeriesCount
+	for tick := range changeSeriesChan {
+		metricsMux.Lock()
+		unregisterMetrics()
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, *currentSeriesCount, seriesCycle)
+		metricsMux.Unlock()
+
+		if inSpike {
+			inSpike = false
+			*currentSeriesCount = initialSeriesCount
+		} else {
+			inSpike = true
+			*currentSeriesCount = int(float64(initialSeriesCount) * spikeMultiplier)
+		}
+
+		fmt.Printf("%v: Adjusting series count. New count: %d\n", tick, *currentSeriesCount)
+
+		select {
+		case updateNotify <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // RunMetrics creates a set of Prometheus test series that update over time
-func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval int, seriesOperationMode string, constLabels []string, stop chan struct{}) (chan struct{}, error) {
+func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval int, spikeMultiplier float64, seriesOperationMode string, constLabels []string, stop chan struct{}) (chan struct{}, error) {
 	labelKeys := make([]string, labelCount)
 	for idx := 0; idx < labelCount; idx++ {
 		labelKeys[idx] = fmt.Sprintf("label_key_%s_%v", strings.Repeat("k", labelLength), idx)
@@ -246,6 +273,17 @@ func RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSerie
 		cycleValues(labelKeys, labelValues, minSeriesCount, seriesCycle)
 		go handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues,
 			seriesChangeRate, minSeriesCount, maxSeriesCount, &currentSeriesCount, changeSeriesTick.C, updateNotify)
+		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
+		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
+
+	case "spike":
+		if spikeMultiplier < 1 {
+			return nil, fmt.Errorf("error: spikeMultiplier must be greater than or equal to 1, got %f", spikeMultiplier)
+		}
+		registerMetrics(metricCount, metricLength, metricCycle, labelKeys)
+		cycleValues(labelKeys, labelValues, currentSeriesCount, seriesCycle)
+		fmt.Printf("Starting spike mode; initial series: %d, spike multiplier: %f, spike interval: %v\n", currentSeriesCount, spikeMultiplier, seriesChangeInterval)
+		go handleSpikeMode(metricCount, metricLength, metricCycle, seriesCycle, labelKeys, labelValues, &currentSeriesCount, spikeMultiplier, changeSeriesTick.C, updateNotify)
 		go handleValueTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, valueTick)
 		go handleSeriesTicks(&labelKeys, &labelValues, &currentSeriesCount, &seriesCycle, updateNotify, seriesTick)
 
