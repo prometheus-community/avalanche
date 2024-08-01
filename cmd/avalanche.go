@@ -43,7 +43,7 @@ var (
 	valueInterval        = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
-	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change' and 'double-halve' modes.").Default("10").Int()
+	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change' and 'double-halve' modes.").Default("30").Int()
 	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve'").Default("default").String()
 	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
@@ -64,15 +64,15 @@ func main() {
 		"\nSeries Operation Modes:\n" +
 		"  double-halve:\n" +
 		"    Alternately doubles and halves the series count at regular intervals.\n" +
-		"    Usage: ./avalanche --operation-mode=double-halve --series-change-interval=30 --series-count=20\n" +
+		"    Usage: ./avalanche --series-operation-mode=double-halve --series-change-interval=30 --series-count=500\n" +
 		"    Description: This mode alternately doubles and halves the series count at regular intervals.\n" +
 		"                 The series count is doubled on one tick and halved on the next, ensuring it never drops below 1.\n" +
 		"\n" +
 		"  gradual-change:\n" +
 		"    Gradually changes the series count by a fixed rate at regular intervals.\n" +
-		"    Usage: ./avalanche --operation-mode=gradual-change --series-change-interval=30 --series-change-rate=10 --series-count=20\n" +
+		"    Usage: ./avalanche --series-operation-mode=gradual-change --series-change-interval=30 --series-change-rate=100 --max-series-count=2000 --min-series-count=200\n" +
 		"    Description: This mode gradually increases the series count by seriesChangeRate on each tick up to maxSeriesCount,\n" +
-		"                 then decreases it back to the starting value, and repeats this cycle indefinitely.\n" +
+		"                 then decreases it back to the minSeriesCount, and repeats this cycle indefinitely.\n" +
 		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1."
 
 	kingpin.Parse()
