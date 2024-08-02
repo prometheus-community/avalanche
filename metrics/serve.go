@@ -199,7 +199,6 @@ func handleGradualChangeMode(metricCount, metricLength, metricCycle, seriesCycle
 }
 
 func handleSpikeMode(metricCount, metricLength, metricCycle, seriesCycle int, labelKeys, labelValues []string, currentSeriesCount *int, spikeMultiplier float64, changeSeriesChan <-chan time.Time, updateNotify chan struct{}) {
-	inSpike := false
 	initialSeriesCount := *currentSeriesCount
 	for tick := range changeSeriesChan {
 		metricsMux.Lock()
@@ -208,11 +207,9 @@ func handleSpikeMode(metricCount, metricLength, metricCycle, seriesCycle int, la
 		cycleValues(labelKeys, labelValues, *currentSeriesCount, seriesCycle)
 		metricsMux.Unlock()
 
-		if inSpike {
-			inSpike = false
+		if *currentSeriesCount > initialSeriesCount {
 			*currentSeriesCount = initialSeriesCount
 		} else {
-			inSpike = true
 			*currentSeriesCount = int(float64(initialSeriesCount) * spikeMultiplier)
 		}
 
