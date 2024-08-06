@@ -14,7 +14,6 @@
 package metrics
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -30,27 +29,7 @@ func TestShuffleTimestamps(t *testing.T) {
 		{Samples: []prompb.Sample{{Timestamp: now}}},
 	}
 
-	originalTimestamps := make([]int64, len(tss))
-	fmt.Println("Original Timestamps:")
-	for i, ts := range tss {
-		originalTimestamps[i] = ts.Samples[0].Timestamp
-		fmt.Println(time.UnixMilli(ts.Samples[0].Timestamp))
-	}
-
 	shuffledTSS := shuffleTimestamps(tss)
-
-	fmt.Println("Shuffled Timestamps:")
-	for _, ts := range shuffledTSS {
-		fmt.Println(time.UnixMilli(ts.Samples[0].Timestamp))
-	}
-
-	fmt.Println("Time Differences:")
-	for i, ts := range shuffledTSS {
-		originalTime := time.UnixMilli(originalTimestamps[i])
-		shuffledTime := time.UnixMilli(ts.Samples[0].Timestamp)
-		diff := originalTime.Sub(shuffledTime)
-		fmt.Printf("Original: %v, Shuffled: %v, Difference: %v\n", originalTime, shuffledTime, diff)
-	}
 
 	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
 	for _, ts := range shuffledTSS {
