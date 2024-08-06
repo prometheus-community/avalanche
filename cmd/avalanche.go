@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -55,12 +56,38 @@ var (
 func main() {
 	kingpin.Version(version.Print("avalanche"))
 	log.SetFlags(log.Ltime | log.Lshortfile) // Show file name and line in logs.
-	kingpin.CommandLine.Help = "avalanche - metrics test server"
+	kingpin.CommandLine.Help = "avalanche - metrics test server\n" +
+		"\nSeries Operation Modes:\n" +
+		"  double-halve:\n" +
+		"    Alternately doubles and halves the series count at regular intervals.\n" +
+		"    Usage: ./avalanche --series-operation-mode=double-halve --series-change-interval=30 --series-count=500\n" +
+		"    Description: This mode alternately doubles and halves the series count at regular intervals.\n" +
+		"                 The series count is doubled on one tick and halved on the next, ensuring it never drops below 1.\n" +
+		"\n" +
+		"  gradual-change:\n" +
+		"    Gradually changes the series count by a fixed rate at regular intervals.\n" +
+		"    Usage: ./avalanche --series-operation-mode=gradual-change --series-change-interval=30 --series-change-rate=100 --max-series-count=2000 --min-series-count=200\n" +
+		"    Description: This mode gradually increases the series count by seriesChangeRate on each tick up to maxSeriesCount,\n" +
+		"                 then decreases it back to the minSeriesCount, and repeats this cycle indefinitely.\n" +
+		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1."
+
 	kingpin.Parse()
+	if *maxSeriesCount <= *minSeriesCount {
+		fmt.Fprintf(os.Stderr, "Error: --max-series-count (%d) must be greater than --min-series-count (%d)\n", *maxSeriesCount, *minSeriesCount)
+		os.Exit(1)
+	}
+	if *minSeriesCount < 0 {
+		fmt.Fprintf(os.Stderr, "Error: --min-series-count must be 0 or higher, got %d\n", *minSeriesCount)
+		os.Exit(1)
+	}
+	if *seriesChangeRate <= 0 {
+		fmt.Fprintf(os.Stderr, "Error: --series-change-rate must be greater than 0, got %d\n", *seriesChangeRate)
+		os.Exit(1)
+	}
 
 	stop := make(chan struct{})
 	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *constLabels, stop)
+	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *seriesChangeRate, *maxSeriesCount, *minSeriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *seriesChangeInterval, *seriesOperationMode, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
 	}
