@@ -54,6 +54,7 @@ type ConfigWrite struct {
 	Tenant          string
 	TLSClientConfig tls.Config
 	TenantHeader    string
+	OutOfOrder      bool
 }
 
 // Client for the remote write requests.
@@ -108,7 +109,7 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write() error {
-	tss, err := collectMetrics()
+	tss, err := collectMetrics(c.config.OutOfOrder)
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,7 @@ func (c *Client) write() error {
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics()
+			tss, err = collectMetrics(c.config.OutOfOrder)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -193,14 +194,28 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	return tss
 }
 
-func collectMetrics() ([]prompb.TimeSeries, error) {
+func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
 	metricsMux.Lock()
 	defer metricsMux.Unlock()
 	metricFamilies, err := promRegistry.Gather()
 	if err != nil {
 		return nil, err
 	}
-	return ToTimeSeriesSlice(metricFamilies), nil
+	tss := ToTimeSeriesSlice(metricFamilies)
+	if outOfOrder {
+		tss = shuffleTimestamps(tss)
+	}
+	return tss, nil
+}
+func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
+	now := time.Now().UnixMilli()
+	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
+
+	for i := range tss {
+		offset := offsets[i%len(offsets)]
+		tss[i].Samples[0].Timestamp = now + offset
+	}
+	return tss
 }
 
 // ToTimeSeriesSlice converts a slice of metricFamilies containing samples into a slice of TimeSeries
