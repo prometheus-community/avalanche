@@ -37,14 +37,15 @@ var (
 	seriesChangeRate     = kingpin.Flag("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' mode.").Default("100").Int()
 	maxSeriesCount       = kingpin.Flag("max-series-count", "Maximum number of series to serve. Applies to 'gradual-change' mode.").Default("1000").Int()
 	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' mode.").Default("100").Int()
+	spikeMultiplier      = kingpin.Flag("spike-multiplier", "Multiplier for the spike mode.").Default("1.5").Float64()
 	metricLength         = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
 	labelLength          = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
 	constLabels          = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
 	valueInterval        = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
 	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
 	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
-	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change' and 'double-halve' modes.").Default("30").Int()
-	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve'").Default("default").String()
+	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change', 'double-halve' and 'spike' modes.").Default("30").Int()
+	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve', 'spike'").Default("default").String()
 	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
 	remotePprofURLs      = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
@@ -73,7 +74,14 @@ func main() {
 		"    Usage: ./avalanche --series-operation-mode=gradual-change --series-change-interval=30 --series-change-rate=100 --max-series-count=2000 --min-series-count=200\n" +
 		"    Description: This mode gradually increases the series count by seriesChangeRate on each tick up to maxSeriesCount,\n" +
 		"                 then decreases it back to the minSeriesCount, and repeats this cycle indefinitely.\n" +
-		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1."
+		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1." +
+		"\n" +
+		"  spike:\n" +
+		"    Periodically spikes the series count by a given multiplier.\n" +
+		"    Usage: ./avalanche --series-operation-mode=spike --series-change-interval=180 --series-count=100 --spike-multiplier=1.5\n" +
+		"    Description: This mode periodically increases the series count by a spike multiplier on one tick and\n" +
+		"                 then returns it to the original count on the next tick. This pattern repeats indefinitely,\n" +
+		"                 creating a spiking effect in the series count.\n"
 
 	kingpin.Parse()
 	if *maxSeriesCount <= *minSeriesCount {
@@ -91,7 +99,7 @@ func main() {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *seriesChangeRate, *maxSeriesCount, *minSeriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *seriesChangeInterval, *seriesOperationMode, *constLabels, stop)
+	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *seriesChangeRate, *maxSeriesCount, *minSeriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *seriesChangeInterval, *spikeMultiplier, *seriesOperationMode, *constLabels, stop)
 	if err != nil {
 		log.Fatal(err)
 	}
