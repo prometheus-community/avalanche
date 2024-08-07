@@ -74,7 +74,7 @@ func main() {
 		"    Usage: ./avalanche --series-operation-mode=gradual-change --series-change-interval=30 --series-change-rate=100 --max-series-count=2000 --min-series-count=200\n" +
 		"    Description: This mode gradually increases the series count by seriesChangeRate on each tick up to maxSeriesCount,\n" +
 		"                 then decreases it back to the minSeriesCount, and repeats this cycle indefinitely.\n" +
-		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1."
+		"                 The series count is incremented by seriesChangeRate on each tick, ensuring it never drops below 1." +
 		"\n" +
 		"  spike:\n" +
 		"    Periodically spikes the series count by a given multiplier.\n" +
