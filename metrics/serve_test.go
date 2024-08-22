@@ -198,11 +198,11 @@ func TestRunMetricsSpikeChange(t *testing.T) {
 		if i%2 == 0 {
 			currentCount := countSeries(t, promRegistry)
 			expectedCount := initialSeriesCount
-			assert.Equal(t, expectedCount, currentCount, "Halved series count should be %d but got %d", int(expectedCount), currentCount)
+			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Halved series count should be %d but got %d", expectedCount, currentCount))
 		} else {
 			currentCount := countSeries(t, promRegistry)
-			expectedCount := initialSeriesCount * spikeMultiplier
-			assert.Equal(t, int(expectedCount), currentCount, "Doubled series count should be %d but got %d", int(expectedCount), float64(currentCount))
+			expectedCount := int(float64(initialSeriesCount) * spikeMultiplier)
+			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Multiplied the series count by %.1f, should be %d but got %d", spikeMultiplier, expectedCount, currentCount))
 		}
 	}
 }
