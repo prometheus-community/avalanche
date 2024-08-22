@@ -44,6 +44,7 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 		labelCount           = 1
 		maxSeriesCount       = 10
 		minSeriesCount       = 1
+		spikeMultiplier      = 1.5
 		seriesChangeRate     = 1
 		metricLength         = 1
 		labelLength          = 1
@@ -60,7 +61,7 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 
 	promRegistry = prometheus.NewRegistry()
 
-	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, operationMode, []string{constLabel}, stop)
+	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
 	assert.NoError(t, err)
 	time.Sleep(2 * time.Second)
 	for i := 0; i < 4; i++ {
@@ -84,6 +85,7 @@ func TestRunMetricsGradualChange(t *testing.T) {
 		seriesCount          = 100
 		maxSeriesCount       = 30
 		minSeriesCount       = 10
+		spikeMultiplier      = 1.5
 		seriesChangeRate     = 10
 		metricLength         = 1
 		labelLength          = 1
@@ -100,7 +102,7 @@ func TestRunMetricsGradualChange(t *testing.T) {
 
 	promRegistry = prometheus.NewRegistry()
 
-	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, operationMode, []string{constLabel}, stop)
+	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
 	assert.NoError(t, err)
 
 	time.Sleep(2 * time.Second)
@@ -142,6 +144,7 @@ func TestRunMetricsWithInvalidSeriesCounts(t *testing.T) {
 		seriesCount          = 100
 		maxSeriesCount       = 10
 		minSeriesCount       = 100
+		spikeMultiplier      = 1.5
 		seriesChangeRate     = 10
 		metricLength         = 1
 		labelLength          = 1
@@ -158,6 +161,48 @@ func TestRunMetricsWithInvalidSeriesCounts(t *testing.T) {
 
 	promRegistry = prometheus.NewRegistry()
 
-	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, operationMode, []string{constLabel}, stop)
+	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
 	assert.Error(t, err)
+}
+
+func TestRunMetricsSpikeChange(t *testing.T) {
+	const (
+		metricCount          = 1
+		labelCount           = 1
+		initialSeriesCount   = 100
+		maxSeriesCount       = 30
+		minSeriesCount       = 10
+		spikeMultiplier      = 1.5
+		seriesChangeRate     = 10
+		metricLength         = 1
+		labelLength          = 1
+		valueInterval        = 100
+		seriesInterval       = 100
+		metricInterval       = 100
+		seriesChangeInterval = 10
+		operationMode        = "spike"
+		constLabel           = "constLabel=test"
+	)
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	promRegistry = prometheus.NewRegistry()
+
+	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
+	assert.NoError(t, err)
+
+	time.Sleep(2 * time.Second)
+	for i := 0; i < 4; i++ {
+		time.Sleep(time.Duration(seriesChangeInterval) * time.Second)
+		if i%2 == 0 {
+			currentCount := countSeries(t, promRegistry)
+			expectedCount := initialSeriesCount
+			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Halved series count should be %d but got %d", expectedCount, currentCount))
+		} else {
+			currentCount := countSeries(t, promRegistry)
+			expectedCount := int(float64(initialSeriesCount) * spikeMultiplier)
+			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Multiplied the series count by %.1f, should be %d but got %d", spikeMultiplier, expectedCount, currentCount))
+		}
+	}
 }
