@@ -19,102 +19,171 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 )
 
 // Helper function to count the series in the registry
-func countSeries(t *testing.T, registry *prometheus.Registry) int {
+func countSeries(t *testing.T, registry *prometheus.Registry) (seriesCount int) {
 	metricsFamilies, err := registry.Gather()
 	assert.NoError(t, err)
 
-	seriesCount := 0
 	for _, mf := range metricsFamilies {
 		for range mf.Metric {
 			seriesCount++
 		}
 	}
-
 	return seriesCount
 }
 
-func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
-	const (
-		initialSeriesCount   = 5
-		metricCount          = 1
-		labelCount           = 1
-		maxSeriesCount       = 10
-		minSeriesCount       = 1
-		spikeMultiplier      = 1.5
-		seriesChangeRate     = 1
-		metricLength         = 1
-		labelLength          = 1
-		valueInterval        = 100
-		seriesInterval       = 100
-		metricInterval       = 100
-		seriesChangeInterval = 3
-		operationMode        = "double-halve"
-		constLabel           = "constLabel=test"
-	)
-
-	stop := make(chan struct{})
-	defer close(stop)
-
-	promRegistry = prometheus.NewRegistry()
-
-	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
+func countSeriesTypes(t *testing.T, registry *prometheus.Registry) (gauges, counters, histograms, nhistograms, summaries int) {
+	metricsFamilies, err := registry.Gather()
 	assert.NoError(t, err)
+
+	for _, mf := range metricsFamilies {
+		for _, m := range mf.Metric {
+			switch mf.GetType() {
+			case io_prometheus_client.MetricType_GAUGE:
+				gauges++
+			case io_prometheus_client.MetricType_COUNTER:
+				counters++
+			case io_prometheus_client.MetricType_HISTOGRAM:
+				if len(m.GetHistogram().Bucket) == 0 {
+					nhistograms++
+				} else {
+					histograms++
+				}
+			case io_prometheus_client.MetricType_SUMMARY:
+				summaries++
+			default:
+				t.Fatalf("unknown metric type found %v", mf.GetType())
+			}
+		}
+	}
+	return gauges, counters, histograms, nhistograms, summaries
+}
+
+func TestRunMetrics(t *testing.T) {
+	testCfg := Config{
+		GaugeMetricCount:           200,
+		CounterMetricCount:         200,
+		HistogramMetricCount:       10,
+		HistogramBuckets:           8,
+		NativeHistogramMetricCount: 10,
+		SummaryMetricCount:         10,
+
+		MinSeriesCount: 0,
+		MaxSeriesCount: 1000,
+		LabelCount:     1,
+		SeriesCount:    10,
+		MetricLength:   1,
+		LabelLength:    1,
+		ConstLabels:    []string{"constLabel=test"},
+	}
+	assert.NoError(t, testCfg.Validate())
+
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
+
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
+
+	time.Sleep(2 * time.Second)
+
+	g, c, h, nh, s := countSeriesTypes(t, reg)
+	assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
+	assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
+	assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+	assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
+	assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+}
+
+func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
+	testCfg := Config{
+		GaugeMetricCount:     1,
+		LabelCount:           1,
+		SeriesCount:          5, // Initial.
+		MaxSeriesCount:       10,
+		MinSeriesCount:       1,
+		SpikeMultiplier:      1.5,
+		SeriesChangeRate:     1,
+		MetricLength:         1,
+		LabelLength:          1,
+		ValueInterval:        100,
+		SeriesInterval:       100,
+		MetricInterval:       100,
+		SeriesChangeInterval: 3,
+		SeriesOperationMode:  "double-halve",
+		ConstLabels:          []string{"constLabel=test"},
+	}
+	assert.NoError(t, testCfg.Validate())
+
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
+
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
+
 	time.Sleep(2 * time.Second)
 	for i := 0; i < 4; i++ {
-		time.Sleep(time.Duration(seriesChangeInterval) * time.Second)
+		time.Sleep(time.Duration(testCfg.SeriesChangeInterval) * time.Second)
 		if i%2 == 0 { // Expecting halved series count
-			currentCount := countSeries(t, promRegistry)
-			expectedCount := initialSeriesCount
+			currentCount := countSeries(t, reg)
+			expectedCount := testCfg.SeriesCount
 			assert.Equal(t, expectedCount, currentCount, "Halved series count should be %d but got %d", expectedCount, currentCount)
 		} else { // Expecting doubled series count
-			currentCount := countSeries(t, promRegistry)
-			expectedCount := initialSeriesCount * 2
+			currentCount := countSeries(t, reg)
+			expectedCount := testCfg.SeriesCount * 2
 			assert.Equal(t, expectedCount, currentCount, "Doubled series count should be %d but got %d", expectedCount, currentCount)
 		}
 	}
 }
 
 func TestRunMetricsGradualChange(t *testing.T) {
-	const (
-		metricCount          = 1
-		labelCount           = 1
-		seriesCount          = 100
-		maxSeriesCount       = 30
-		minSeriesCount       = 10
-		spikeMultiplier      = 1.5
-		seriesChangeRate     = 10
-		metricLength         = 1
-		labelLength          = 1
-		valueInterval        = 100
-		seriesInterval       = 100
-		metricInterval       = 100
-		seriesChangeInterval = 3
-		operationMode        = "gradual-change"
-		constLabel           = "constLabel=test"
-	)
+	testCfg := Config{
+		GaugeMetricCount:     1,
+		LabelCount:           1,
+		SeriesCount:          100, // Initial.
+		MaxSeriesCount:       30,
+		MinSeriesCount:       10,
+		SpikeMultiplier:      1.5,
+		SeriesChangeRate:     10,
+		MetricLength:         1,
+		LabelLength:          1,
+		ValueInterval:        100,
+		SeriesInterval:       100,
+		MetricInterval:       100,
+		SeriesChangeInterval: 3,
+		SeriesOperationMode:  "gradual-change",
+		ConstLabels:          []string{"constLabel=test"},
+	}
+	assert.NoError(t, testCfg.Validate())
 
-	stop := make(chan struct{})
-	defer close(stop)
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
 
-	promRegistry = prometheus.NewRegistry()
-
-	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
-	assert.NoError(t, err)
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
 
 	time.Sleep(2 * time.Second)
-	currentCount := countSeries(t, promRegistry)
+	currentCount := countSeries(t, reg)
 	expectedInitialCount := currentCount
 	assert.Equal(t, expectedInitialCount, currentCount, "Initial series count should be minSeriesCount %d but got %d", expectedInitialCount, currentCount)
 
 	assert.Eventually(t, func() bool {
-		graduallyIncreasedCount := countSeries(t, promRegistry)
+		graduallyIncreasedCount := countSeries(t, reg)
 		fmt.Println("seriesCount: ", graduallyIncreasedCount)
-		if graduallyIncreasedCount > maxSeriesCount {
-			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", maxSeriesCount, graduallyIncreasedCount)
+		if graduallyIncreasedCount > testCfg.MaxSeriesCount {
+			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", testCfg.MaxSeriesCount, graduallyIncreasedCount)
 		}
 		if currentCount > graduallyIncreasedCount {
 			t.Fatalf("Gradually increased series count should be greater than initial series count %d but got %d", currentCount, graduallyIncreasedCount)
@@ -122,87 +191,81 @@ func TestRunMetricsGradualChange(t *testing.T) {
 			currentCount = graduallyIncreasedCount
 		}
 
-		return graduallyIncreasedCount == maxSeriesCount
-	}, 15*time.Second, seriesChangeInterval*time.Second, "Did not receive update notification for series count gradual increase in time")
+		return graduallyIncreasedCount == testCfg.MaxSeriesCount
+	}, 15*time.Second, time.Duration(testCfg.SeriesChangeInterval)*time.Second, "Did not receive update notification for series count gradual increase in time")
 
 	assert.Eventually(t, func() bool {
-		graduallyIncreasedCount := countSeries(t, promRegistry)
+		graduallyIncreasedCount := countSeries(t, reg)
 		fmt.Println("seriesCount: ", graduallyIncreasedCount)
-		if graduallyIncreasedCount < minSeriesCount {
-			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", maxSeriesCount, graduallyIncreasedCount)
+		if graduallyIncreasedCount < testCfg.MinSeriesCount {
+			t.Fatalf("Gradually increased series count should be less than maxSeriesCount %d but got %d", testCfg.MaxSeriesCount, graduallyIncreasedCount)
 		}
 
-		return graduallyIncreasedCount == minSeriesCount
-	}, 15*time.Second, seriesChangeInterval*time.Second, "Did not receive update notification for series count gradual increase in time")
+		return graduallyIncreasedCount == testCfg.MinSeriesCount
+	}, 15*time.Second, time.Duration(testCfg.SeriesChangeInterval)*time.Second, "Did not receive update notification for series count gradual increase in time")
 }
 
-// if min is bigger than maxSeriesCount, fail in GradualChange
 func TestRunMetricsWithInvalidSeriesCounts(t *testing.T) {
-	const (
-		metricCount          = 1
-		labelCount           = 1
-		seriesCount          = 100
-		maxSeriesCount       = 10
-		minSeriesCount       = 100
-		spikeMultiplier      = 1.5
-		seriesChangeRate     = 10
-		metricLength         = 1
-		labelLength          = 1
-		valueInterval        = 100
-		seriesInterval       = 100
-		metricInterval       = 100
-		seriesChangeInterval = 3
-		operationMode        = "gradual-change"
-		constLabel           = "constLabel=test"
-	)
-
-	stop := make(chan struct{})
-	defer close(stop)
-
-	promRegistry = prometheus.NewRegistry()
-
-	_, err := RunMetrics(metricCount, labelCount, seriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
-	assert.Error(t, err)
+	testCfg := Config{
+		GaugeMetricCount:     1,
+		LabelCount:           1,
+		SeriesCount:          100,
+		MaxSeriesCount:       10,
+		MinSeriesCount:       100,
+		SpikeMultiplier:      1.5,
+		SeriesChangeRate:     10,
+		MetricLength:         1,
+		LabelLength:          1,
+		ValueInterval:        100,
+		SeriesInterval:       100,
+		MetricInterval:       100,
+		SeriesChangeInterval: 3,
+		SeriesOperationMode:  "gradual-change",
+		ConstLabels:          []string{"constLabel=test"},
+	}
+	assert.Error(t, testCfg.Validate())
 }
 
 func TestRunMetricsSpikeChange(t *testing.T) {
-	const (
-		metricCount          = 1
-		labelCount           = 1
-		initialSeriesCount   = 100
-		maxSeriesCount       = 30
-		minSeriesCount       = 10
-		spikeMultiplier      = 1.5
-		seriesChangeRate     = 10
-		metricLength         = 1
-		labelLength          = 1
-		valueInterval        = 100
-		seriesInterval       = 100
-		metricInterval       = 100
-		seriesChangeInterval = 10
-		operationMode        = "spike"
-		constLabel           = "constLabel=test"
-	)
+	testCfg := Config{
+		GaugeMetricCount:     1,
+		LabelCount:           1,
+		SeriesCount:          100,
+		MaxSeriesCount:       30,
+		MinSeriesCount:       10,
+		SpikeMultiplier:      1.5,
+		SeriesChangeRate:     10,
+		MetricLength:         1,
+		LabelLength:          1,
+		ValueInterval:        100,
+		SeriesInterval:       100,
+		MetricInterval:       100,
+		SeriesChangeInterval: 10,
+		SeriesOperationMode:  "spike",
+		ConstLabels:          []string{"constLabel=test"},
+	}
+	assert.NoError(t, testCfg.Validate())
 
-	stop := make(chan struct{})
-	defer close(stop)
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
 
-	promRegistry = prometheus.NewRegistry()
-
-	_, err := RunMetrics(metricCount, labelCount, initialSeriesCount, seriesChangeRate, maxSeriesCount, minSeriesCount, metricLength, labelLength, valueInterval, seriesInterval, metricInterval, seriesChangeInterval, spikeMultiplier, operationMode, []string{constLabel}, stop)
-	assert.NoError(t, err)
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
 
 	time.Sleep(2 * time.Second)
 	for i := 0; i < 4; i++ {
-		time.Sleep(time.Duration(seriesChangeInterval) * time.Second)
+		time.Sleep(time.Duration(testCfg.SeriesChangeInterval) * time.Second)
 		if i%2 == 0 {
-			currentCount := countSeries(t, promRegistry)
-			expectedCount := initialSeriesCount
+			currentCount := countSeries(t, reg)
+			expectedCount := testCfg.SeriesCount
 			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Halved series count should be %d but got %d", expectedCount, currentCount))
 		} else {
-			currentCount := countSeries(t, promRegistry)
-			expectedCount := int(float64(initialSeriesCount) * spikeMultiplier)
-			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Multiplied the series count by %.1f, should be %d but got %d", spikeMultiplier, expectedCount, currentCount))
+			currentCount := countSeries(t, reg)
+			expectedCount := int(float64(testCfg.SeriesCount) * testCfg.SpikeMultiplier)
+			assert.Equal(t, expectedCount, currentCount, fmt.Sprintf("Multiplied the series count by %.1f, should be %d but got %d", testCfg.SpikeMultiplier, expectedCount, currentCount))
 		}
 	}
 }

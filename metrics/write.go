@@ -27,16 +27,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus-community/avalanche/pkg/download"
+	"github.com/prometheus-community/avalanche/pkg/errors"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
-
-	"github.com/prometheus-community/avalanche/pkg/download"
-
-	dto "github.com/prometheus/client_model/go"
-
-	"github.com/prometheus-community/avalanche/pkg/errors"
 )
 
 const maxErrMsgLen = 256
@@ -59,14 +58,15 @@ type ConfigWrite struct {
 
 // Client for the remote write requests.
 type Client struct {
-	client  *http.Client
-	timeout time.Duration
-	config  *ConfigWrite
+	client   *http.Client
+	timeout  time.Duration
+	config   *ConfigWrite
+	gatherer prometheus.Gatherer
 }
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(config *ConfigWrite) error {
+func SendRemoteWrite(config *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &config.TLSClientConfig,
 	}
@@ -74,9 +74,10 @@ func SendRemoteWrite(config *ConfigWrite) error {
 	httpClient := &http.Client{Transport: rt}
 
 	c := Client{
-		client:  httpClient,
-		timeout: time.Minute,
-		config:  config,
+		client:   httpClient,
+		timeout:  time.Minute,
+		config:   config,
+		gatherer: gatherer,
 	}
 	return c.write()
 }
@@ -109,7 +110,7 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write() error {
-	tss, err := collectMetrics(c.config.OutOfOrder)
+	tss, err := collectMetrics(c.gatherer, c.config.OutOfOrder)
 	if err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func (c *Client) write() error {
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics(c.config.OutOfOrder)
+			tss, err = collectMetrics(c.gatherer, c.config.OutOfOrder)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -194,10 +195,8 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	return tss
 }
 
-func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
-	metricsMux.Lock()
-	defer metricsMux.Unlock()
-	metricFamilies, err := promRegistry.Gather()
+func collectMetrics(gatherer prometheus.Gatherer, outOfOrder bool) ([]prompb.TimeSeries, error) {
+	metricFamilies, err := gatherer.Gather()
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +206,7 @@ func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
 	}
 	return tss, nil
 }
+
 func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	now := time.Now().UnixMilli()
 	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
