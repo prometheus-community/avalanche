@@ -14,49 +14,27 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/nelkinda/health-go"
+	"github.com/oklog/run"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/prometheus-community/avalanche/metrics"
 	"github.com/prometheus-community/avalanche/pkg/download"
-)
-
-var (
-	metricCount          = kingpin.Flag("metric-count", "Number of metrics to serve.").Default("500").Int()
-	labelCount           = kingpin.Flag("label-count", "Number of labels per-metric.").Default("10").Int()
-	seriesCount          = kingpin.Flag("series-count", "Number of series per-metric.").Default("100").Int()
-	seriesChangeRate     = kingpin.Flag("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' mode.").Default("100").Int()
-	maxSeriesCount       = kingpin.Flag("max-series-count", "Maximum number of series to serve. Applies to 'gradual-change' mode.").Default("1000").Int()
-	minSeriesCount       = kingpin.Flag("min-series-count", "Minimum number of series to serve. Applies to 'gradual-change' mode.").Default("100").Int()
-	spikeMultiplier      = kingpin.Flag("spike-multiplier", "Multiplier for the spike mode.").Default("1.5").Float64()
-	metricLength         = kingpin.Flag("metricname-length", "Modify length of metric names.").Default("5").Int()
-	labelLength          = kingpin.Flag("labelname-length", "Modify length of label names.").Default("5").Int()
-	constLabels          = kingpin.Flag("const-label", "Constant label to add to every metric. Format is labelName=labelValue. Flag can be specified multiple times.").Strings()
-	valueInterval        = kingpin.Flag("value-interval", "Change series values every {interval} seconds.").Default("30").Int()
-	labelInterval        = kingpin.Flag("series-interval", "Change series_id label values every {interval} seconds.").Default("60").Int()
-	metricInterval       = kingpin.Flag("metric-interval", "Change __name__ label values every {interval} seconds.").Default("120").Int()
-	seriesChangeInterval = kingpin.Flag("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change', 'double-halve' and 'spike' modes.").Default("30").Int()
-	seriesOperationMode  = kingpin.Flag("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve', 'spike'").Default("default").String()
-	port                 = kingpin.Flag("port", "Port to serve at").Default("9001").Int()
-	remoteURL            = kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
-	remotePprofURLs      = kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
-	remotePprofInterval  = kingpin.Flag("remote-pprof-interval", "how often to download pprof profiles.When not provided it will download a profile once before the end of the test.").Duration()
-	remoteBatchSize      = kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
-	remoteRequestCount   = kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
-	remoteReqsInterval   = kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
-	remoteTenant         = kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
-	tlsClientInsecure    = kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
-	remoteTenantHeader   = kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
-	outOfOrder           = kingpin.Flag("out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
 )
 
 func main() {
@@ -84,27 +62,35 @@ func main() {
 		"                 then returns it to the original count on the next tick. This pattern repeats indefinitely,\n" +
 		"                 creating a spiking effect in the series count.\n"
 
+	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
+	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
+	remoteURL := kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
+	// TODO(bwplotka): Kill pprof feature, you can install OSS continuous profiling easily instead.
+	remotePprofURLs := kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
+	remotePprofInterval := kingpin.Flag("remote-pprof-interval", "how often to download pprof profiles. When not provided it will download a profile once before the end of the test.").Duration()
+	remoteBatchSize := kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
+	remoteRequestCount := kingpin.Flag("remote-requests-count", "how many requests to send in total to the remote_write API.").Default("100").Int()
+	remoteReqsInterval := kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
+	remoteTenant := kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
+	tlsClientInsecure := kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
+	remoteTenantHeader := kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
+	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
+	outOfOrder := kingpin.Flag("out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
+
 	kingpin.Parse()
-	if *maxSeriesCount <= *minSeriesCount {
-		fmt.Fprintf(os.Stderr, "Error: --max-series-count (%d) must be greater than --min-series-count (%d)\n", *maxSeriesCount, *minSeriesCount)
-		os.Exit(1)
-	}
-	if *minSeriesCount < 0 {
-		fmt.Fprintf(os.Stderr, "Error: --min-series-count must be 0 or higher, got %d\n", *minSeriesCount)
-		os.Exit(1)
-	}
-	if *seriesChangeRate <= 0 {
-		fmt.Fprintf(os.Stderr, "Error: --series-change-rate must be greater than 0, got %d\n", *seriesChangeRate)
-		os.Exit(1)
+	if err := cfg.Validate(); err != nil {
+		kingpin.FatalUsage("configuration error: %v", err)
 	}
 
-	stop := make(chan struct{})
-	defer close(stop)
-	updateNotify, err := metrics.RunMetrics(*metricCount, *labelCount, *seriesCount, *seriesChangeRate, *maxSeriesCount, *minSeriesCount, *metricLength, *labelLength, *valueInterval, *labelInterval, *metricInterval, *seriesChangeInterval, *spikeMultiplier, *seriesOperationMode, *constLabels, stop)
-	if err != nil {
-		log.Fatal(err)
-	}
+	collector := metrics.NewCollector(*cfg)
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collector)
 
+	var g run.Group
+	g.Add(run.SignalHandler(context.Background(), os.Interrupt, syscall.SIGTERM))
+	g.Add(collector.Run, collector.Stop)
+
+	// One-off remote write send mode.
 	if *remoteURL != nil {
 		if (**remoteURL).Host == "" || (**remoteURL).Scheme == "" {
 			log.Fatal("remote host and scheme can't be empty")
@@ -118,7 +104,7 @@ func main() {
 			RequestInterval: *remoteReqsInterval,
 			BatchSize:       *remoteBatchSize,
 			RequestCount:    *remoteRequestCount,
-			UpdateNotify:    updateNotify,
+			UpdateNotify:    collector.UpdateNotifyCh(),
 			Tenant:          *remoteTenant,
 			TLSClientConfig: tls.Config{
 				InsecureSkipVerify: *tlsClientInsecure,
@@ -158,11 +144,10 @@ func main() {
 					wg.Done()
 				}
 			}()
-
 		}
+
 		// First cut: just send the metrics once then exit
-		err := metrics.SendRemoteWrite(config)
-		if err != nil {
+		if err := metrics.SendRemoteWrite(config, reg); err != nil {
 			log.Fatal(err)
 		}
 		if *remotePprofInterval > 0 {
@@ -172,9 +157,16 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Serving your metrics at localhost:%v/metrics\n", *port)
-	err = metrics.ServeMetrics(*port)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Standard mode for continuous exposure of metrics.
+	httpSrv := &http.Server{Addr: fmt.Sprintf(":%v", *port)}
+	g.Add(func() error {
+		fmt.Printf("Serving your metrics at :%v/metrics\n", *port)
+		http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+			EnableOpenMetrics: true,
+		}))
+		http.HandleFunc("/health", health.New(health.Health{}).Handler)
+		return httpSrv.ListenAndServe()
+	}, func(_ error) {
+		_ = httpSrv.Shutdown(context.Background())
+	})
 }
