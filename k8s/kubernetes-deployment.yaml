@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: pg-avalanche
-        image: quay.io/freshtracks.io/avalanche:latest
+        image: quay.io/prometheuscommunity/avalanche:main
         args:
         - "--metric-count=1000"
         - "--series-count=50"
