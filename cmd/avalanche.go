@@ -81,6 +81,7 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		kingpin.FatalUsage("configuration error: %v", err)
 	}
+	log.Println("initializing avalanche...")
 
 	collector := metrics.NewCollector(*cfg)
 	reg := prometheus.NewRegistry()
@@ -169,4 +170,11 @@ func main() {
 	}, func(_ error) {
 		_ = httpSrv.Shutdown(context.Background())
 	})
+
+	log.Println("starting avalanche...")
+	if err := g.Run(); err != nil {
+		//nolint:errcheck
+		log.Fatalf("running avalanche failed %v", err)
+	}
+	log.Println("avalanche finished")
 }
