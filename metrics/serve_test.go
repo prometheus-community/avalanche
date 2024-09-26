@@ -15,16 +15,20 @@ package metrics
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Helper function to count the series in the registry
 func countSeries(t *testing.T, registry *prometheus.Registry) (seriesCount int) {
+	t.Helper()
+
 	metricsFamilies, err := registry.Gather()
 	assert.NoError(t, err)
 
@@ -37,6 +41,8 @@ func countSeries(t *testing.T, registry *prometheus.Registry) (seriesCount int) 
 }
 
 func countSeriesTypes(t *testing.T, registry *prometheus.Registry) (gauges, counters, histograms, nhistograms, summaries int) {
+	t.Helper()
+
 	metricsFamilies, err := registry.Gather()
 	assert.NoError(t, err)
 
@@ -99,6 +105,129 @@ func TestRunMetrics(t *testing.T) {
 	assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
 	assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
 	assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+}
+
+func TestRunMetrics_ValueChange_SeriesCountSame(t *testing.T) {
+	testCfg := Config{
+		GaugeMetricCount:           200,
+		CounterMetricCount:         200,
+		HistogramMetricCount:       10,
+		HistogramBuckets:           8,
+		NativeHistogramMetricCount: 10,
+		SummaryMetricCount:         10,
+
+		MinSeriesCount: 0,
+		MaxSeriesCount: 1000,
+		LabelCount:     1,
+		SeriesCount:    10,
+		MetricLength:   1,
+		LabelLength:    1,
+		ConstLabels:    []string{"constLabel=test"},
+
+		ValueInterval: 1, // Change value every second.
+	}
+	assert.NoError(t, testCfg.Validate())
+
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
+
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
+
+	// We can't assert value, or even it's change without mocking random generator,
+	// but let's at least assert series count does not change.
+	for i := 0; i < 5; i++ {
+		time.Sleep(2 * time.Second)
+
+		g, c, h, nh, s := countSeriesTypes(t, reg)
+		assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
+		assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
+		assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+		assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
+		assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+	}
+}
+
+func currentCycleID(t *testing.T, registry *prometheus.Registry) (cycleID int) {
+	t.Helper()
+
+	metricsFamilies, err := registry.Gather()
+	assert.NoError(t, err)
+
+	cycleID = -1
+	for _, mf := range metricsFamilies {
+		for _, m := range mf.Metric {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "cycle_id" {
+					gotCycleID, err := strconv.Atoi(l.GetValue())
+					require.NoError(t, err)
+
+					if cycleID == -1 {
+						cycleID = gotCycleID
+						continue
+					}
+					if cycleID != gotCycleID {
+						t.Fatalf("expected cycle ID to be the same across all metrics, previous metric had cycle_id=%v; now found %v", cycleID, m.GetLabel())
+					}
+				}
+			}
+		}
+	}
+	return cycleID
+}
+
+func TestRunMetrics_SeriesChurn(t *testing.T) {
+	testCfg := Config{
+		GaugeMetricCount:           200,
+		CounterMetricCount:         200,
+		HistogramMetricCount:       10,
+		HistogramBuckets:           8,
+		NativeHistogramMetricCount: 10,
+		SummaryMetricCount:         10,
+
+		MinSeriesCount: 0,
+		MaxSeriesCount: 1000,
+		LabelCount:     1,
+		SeriesCount:    10,
+		MetricLength:   1,
+		LabelLength:    1,
+		ConstLabels:    []string{"constLabel=test"},
+
+		SeriesInterval: 1, // Churn series every second.
+		// Change value every second too, there was a regression when both value and series cycle.
+		ValueInterval: 1,
+	}
+	assert.NoError(t, testCfg.Validate())
+
+	reg := prometheus.NewRegistry()
+	coll := NewCollector(testCfg)
+	reg.MustRegister(coll)
+
+	go coll.Run()
+	t.Cleanup(func() {
+		coll.Stop(nil)
+	})
+
+	cycleID := -1
+	// No matter how much time we wait, we should see always same series count, just
+	// different cycle_id.
+	for i := 0; i < 5; i++ {
+		time.Sleep(2 * time.Second)
+
+		g, c, h, nh, s := countSeriesTypes(t, reg)
+		assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
+		assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
+		assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+		assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
+		assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+
+		gotCycleID := currentCycleID(t, reg)
+		require.Greater(t, gotCycleID, cycleID)
+		cycleID = gotCycleID
+	}
 }
 
 func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
@@ -176,8 +305,8 @@ func TestRunMetricsGradualChange(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 	currentCount := countSeries(t, reg)
-	expectedInitialCount := currentCount
-	assert.Equal(t, expectedInitialCount, currentCount, "Initial series count should be minSeriesCount %d but got %d", expectedInitialCount, currentCount)
+	fmt.Println("seriesCount: ", currentCount)
+	assert.Equal(t, testCfg.MinSeriesCount, currentCount, "Initial series count should be minSeriesCount %d but got %d", testCfg.MinSeriesCount, currentCount)
 
 	assert.Eventually(t, func() bool {
 		graduallyIncreasedCount := countSeries(t, reg)
