@@ -147,18 +147,19 @@ func main() {
 			}()
 		}
 
-		// First cut: just send the metrics once then exit
-		if err := metrics.SendRemoteWrite(config, reg); err != nil {
-			log.Fatal(err)
-		}
-		if *remotePprofInterval > 0 {
-			done <- struct{}{}
-			wg.Wait()
-		}
-		return
+		ctx, cancel := context.WithCancel(context.Background())
+		g.Add(func() error {
+			if err := metrics.SendRemoteWrite(ctx, config, reg); err != nil {
+				return err
+			}
+			if *remotePprofInterval > 0 {
+				done <- struct{}{}
+				wg.Wait()
+			}
+			return nil // One-off.
+		}, func(error) { cancel() })
 	}
 
-	// Standard mode for continuous exposure of metrics.
 	httpSrv := &http.Server{Addr: fmt.Sprintf(":%v", *port)}
 	g.Add(func() error {
 		fmt.Printf("Serving your metrics at :%v/metrics\n", *port)
