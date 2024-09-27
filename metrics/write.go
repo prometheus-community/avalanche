@@ -128,7 +128,9 @@ func (c *Client) write(ctx context.Context) error {
 	log.Printf("Sending: %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
 	ticker := time.NewTicker(c.config.RequestInterval)
 	defer ticker.Stop()
-	for ii := 0; c.config.RequestCount == -1 || ii < c.config.RequestCount; ii++ {
+	left := c.config.RequestCount // left equal to -1 means infinite amount of requests.
+	for left != 0 {
+	      left--
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
