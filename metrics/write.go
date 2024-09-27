@@ -130,7 +130,7 @@ func (c *Client) write(ctx context.Context) error {
 	defer ticker.Stop()
 	left := c.config.RequestCount // left equal to -1 means infinite amount of requests.
 	for left != 0 {
-	      left--
+		left--
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
