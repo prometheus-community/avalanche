@@ -517,6 +517,12 @@ func (c *Collector) Run() error {
 	go c.handleSeriesTicks(&mutableState.seriesCycle, unsafeReadOnlyGetState)
 	go c.handleMetricTicks(&mutableState.metricCycle, unsafeReadOnlyGetState)
 
+	// Mark best-effort update, so remote write knows (if enabled).
+	select {
+	case c.updateNotifyCh <- struct{}{}:
+	default:
+	}
+
 	<-c.stopCh
 	return nil
 }
