@@ -128,14 +128,14 @@ func (c *Client) write(ctx context.Context) error {
 	log.Printf("Sending: %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
 	ticker := time.NewTicker(c.config.RequestInterval)
 	defer ticker.Stop()
-	for ii := 0; ii < c.config.RequestCount; ii++ {
+	for ii := 0; c.config.RequestCount == -1 || ii < c.config.RequestCount; ii++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
 		// Download the pprofs during half of the iteration to get avarege readings.
 		// Do that only when it is not set to take profiles at a given interval.
-		if len(c.config.PprofURLs) > 0 && ii == c.config.RequestCount/2 {
+		if len(c.config.PprofURLs) > 0 && c.config.RequestCount != -1 && ii == c.config.RequestCount/2 {
 			wgPprof.Add(1)
 			go func() {
 				download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
