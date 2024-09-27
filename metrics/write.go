@@ -110,6 +110,13 @@ func cloneRequest(r *http.Request) *http.Request {
 }
 
 func (c *Client) write(ctx context.Context) error {
+	select {
+	// Wait for update first as write and collector.Run runs simultaneously.
+	case <-c.config.UpdateNotify:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	tss, err := collectMetrics(c.gatherer, c.config.OutOfOrder)
 	if err != nil {
 		return err
@@ -125,23 +132,39 @@ func (c *Client) write(ctx context.Context) error {
 		merr            = &errors.MultiError{}
 	)
 
-	log.Printf("Sending: %v timeseries, %v samples, %v timeseries per request, %v delay between requests\n", len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	shouldRunForever := c.config.RequestCount == -1
+	if shouldRunForever {
+		log.Printf("Sending: %v timeseries infinitely, %v timeseries per request, %v delay between requests\n",
+			len(tss), c.config.BatchSize, c.config.RequestInterval)
+	} else {
+		log.Printf("Sending: %v timeseries, %v times, %v timeseries per request, %v delay between requests\n",
+			len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	}
+
 	ticker := time.NewTicker(c.config.RequestInterval)
 	defer ticker.Stop()
-	for ii := 0; ii < c.config.RequestCount; ii++ {
+
+	for i := 0; ; {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// Download the pprofs during half of the iteration to get avarege readings.
-		// Do that only when it is not set to take profiles at a given interval.
-		if len(c.config.PprofURLs) > 0 && ii == c.config.RequestCount/2 {
-			wgPprof.Add(1)
-			go func() {
-				download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
-				wgPprof.Done()
-			}()
+		if !shouldRunForever {
+			if i < c.config.RequestCount {
+				break
+			}
+			i++
+			// Download the pprofs during half of the iteration to get avarege readings.
+			// Do that only when it is not set to take profiles at a given interval.
+			if len(c.config.PprofURLs) > 0 && i == c.config.RequestCount/2 {
+				wgPprof.Add(1)
+				go func() {
+					download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
+					wgPprof.Done()
+				}()
+			}
 		}
+
 		<-ticker.C
 		select {
 		case <-c.config.UpdateNotify:
@@ -166,8 +189,7 @@ func (c *Client) write(ctx context.Context) error {
 				req := &prompb.WriteRequest{
 					Timeseries: tss[i:end],
 				}
-				err := c.Store(context.TODO(), req)
-				if err != nil {
+				if err := c.Store(context.TODO(), req); err != nil {
 					merr.Add(err)
 					return
 				}
