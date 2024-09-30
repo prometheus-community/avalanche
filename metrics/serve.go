@@ -106,9 +106,9 @@ func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Co
 	flagReg("histogram-metric-count", "Number of explicit (classic) histogram metrics to serve.").Default("10").
 		IntVar(&cfg.HistogramMetricCount)
 	flagReg("histogram-metric-bucket-count", "Number of explicit buckets (classic) histogram metrics.").Default("8").
-		IntVar(&cfg.HistogramMetricCount)
-	flagReg("native-histogram-metric-count", "Number of native (exponential) histogram metrics to serve.").Default("0").
 		IntVar(&cfg.HistogramBuckets)
+	flagReg("native-histogram-metric-count", "Number of native (exponential) histogram metrics to serve.").Default("0").
+		IntVar(&cfg.NativeHistogramMetricCount)
 	flagReg("summary-metric-count", "Number of summary metrics to serve.").Default("0").
 		IntVar(&cfg.SummaryMetricCount)
 
