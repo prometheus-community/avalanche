@@ -207,6 +207,7 @@ func collectMetrics(outOfOrder bool) ([]prompb.TimeSeries, error) {
 	}
 	return tss, nil
 }
+
 func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	now := time.Now().UnixMilli()
 	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
