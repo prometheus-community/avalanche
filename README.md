@@ -32,6 +32,6 @@ Two endpoints are available :
 ## build and run go binary
 
 ```bash
-go get github.com/prometheus-community/avalanche/cmd/...
-avalanche --help
+go install github.com/prometheus-community/avalanche/cmd@latest
+go/bin/cmd --help
 ```
