@@ -15,6 +15,7 @@ package metrics
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ func countSeries(t *testing.T, registry *prometheus.Registry) (seriesCount int) 
 	return seriesCount
 }
 
+// countSeriesTypes gives exact count of all types. For complex types that are represented by counters in Prometheus
+// data model (and text exposition formats), we count all individual resulting series.
 func countSeriesTypes(t *testing.T, registry *prometheus.Registry) (gauges, counters, histograms, nhistograms, summaries int) {
 	t.Helper()
 
@@ -54,13 +57,20 @@ func countSeriesTypes(t *testing.T, registry *prometheus.Registry) (gauges, coun
 			case io_prometheus_client.MetricType_COUNTER:
 				counters++
 			case io_prometheus_client.MetricType_HISTOGRAM:
-				if len(m.GetHistogram().Bucket) == 0 {
+				if bkts := len(m.GetHistogram().Bucket); bkts == 0 {
 					nhistograms++
 				} else {
-					histograms++
+					histograms += 2 // count and sum.
+					histograms += len(m.GetHistogram().GetBucket())
+					if m.GetHistogram().GetBucket()[bkts-1].GetUpperBound() != math.Inf(+1) {
+						// In the proto model we don't put explicit +Inf bucket, unless there is an exemplar,
+						// but it will appear as series in text format and Prometheus model. Account for that.
+						histograms++
+					}
 				}
 			case io_prometheus_client.MetricType_SUMMARY:
-				summaries++
+				summaries += 2 // count and sum.
+				summaries += len(m.GetSummary().GetQuantile())
 			default:
 				t.Fatalf("unknown metric type found %v", mf.GetType())
 			}
@@ -74,9 +84,10 @@ func TestRunMetrics(t *testing.T) {
 		GaugeMetricCount:           200,
 		CounterMetricCount:         200,
 		HistogramMetricCount:       10,
-		HistogramBuckets:           8,
+		HistogramBuckets:           7,
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
+		SummaryObjectives:          2,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -102,9 +113,9 @@ func TestRunMetrics(t *testing.T) {
 	g, c, h, nh, s := countSeriesTypes(t, reg)
 	assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
 	assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
-	assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+	assert.Equal(t, (2+testCfg.HistogramBuckets+1)*testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
 	assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
-	assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+	assert.Equal(t, (2+testCfg.SummaryObjectives)*testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
 }
 
 func TestRunMetrics_ValueChange_SeriesCountSame(t *testing.T) {
@@ -112,9 +123,10 @@ func TestRunMetrics_ValueChange_SeriesCountSame(t *testing.T) {
 		GaugeMetricCount:           200,
 		CounterMetricCount:         200,
 		HistogramMetricCount:       10,
-		HistogramBuckets:           8,
+		HistogramBuckets:           7,
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
+		SummaryObjectives:          2,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -145,9 +157,9 @@ func TestRunMetrics_ValueChange_SeriesCountSame(t *testing.T) {
 		g, c, h, nh, s := countSeriesTypes(t, reg)
 		assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
 		assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
-		assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+		assert.Equal(t, (2+testCfg.HistogramBuckets+1)*testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
 		assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
-		assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+		assert.Equal(t, (2+testCfg.SummaryObjectives)*testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
 	}
 }
 
@@ -184,9 +196,10 @@ func TestRunMetrics_SeriesChurn(t *testing.T) {
 		GaugeMetricCount:           200,
 		CounterMetricCount:         200,
 		HistogramMetricCount:       10,
-		HistogramBuckets:           8,
+		HistogramBuckets:           7,
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
+		SummaryObjectives:          2,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -220,9 +233,9 @@ func TestRunMetrics_SeriesChurn(t *testing.T) {
 		g, c, h, nh, s := countSeriesTypes(t, reg)
 		assert.Equal(t, testCfg.GaugeMetricCount*testCfg.SeriesCount, g)
 		assert.Equal(t, testCfg.CounterMetricCount*testCfg.SeriesCount, c)
-		assert.Equal(t, testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
+		assert.Equal(t, (2+testCfg.HistogramBuckets+1)*testCfg.HistogramMetricCount*testCfg.SeriesCount, h)
 		assert.Equal(t, testCfg.NativeHistogramMetricCount*testCfg.SeriesCount, nh)
-		assert.Equal(t, testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
+		assert.Equal(t, (2+testCfg.SummaryObjectives)*testCfg.SummaryMetricCount*testCfg.SeriesCount, s)
 
 		gotCycleID := currentCycleID(t, reg)
 		require.Greater(t, gotCycleID, cycleID)
