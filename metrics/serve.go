@@ -81,7 +81,8 @@ func (c *Collector) UpdateNotifyCh() chan struct{} {
 
 type Config struct {
 	MetricCount, GaugeMetricCount, CounterMetricCount, HistogramMetricCount, NativeHistogramMetricCount, SummaryMetricCount int
-	HistogramBuckets                                                                                                        int
+
+	HistogramBuckets, SummaryObjectives int
 
 	LabelCount, SeriesCount        int
 	MaxSeriesCount, MinSeriesCount int
@@ -103,14 +104,16 @@ func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Co
 		IntVar(&cfg.GaugeMetricCount)
 	flagReg("counter-metric-count", "Number of counter metrics to serve.").Default("200").
 		IntVar(&cfg.CounterMetricCount)
-	flagReg("histogram-metric-count", "Number of explicit (classic) histogram metrics to serve.").Default("10").
+	flagReg("histogram-metric-count", "Number of explicit (classic) histogram metrics to serve. Use -histogram-metric-bucket-count to control number of buckets. Note that the overall number of series for a single classic histogram metric is equal to 2 (count and sum) + <histogram-metric-bucket-count> + 1 (+Inf bucket).").Default("10").
 		IntVar(&cfg.HistogramMetricCount)
-	flagReg("histogram-metric-bucket-count", "Number of explicit buckets (classic) histogram metrics.").Default("8").
+	flagReg("histogram-metric-bucket-count", "Number of explicit buckets (classic) histogram metrics, excluding +Inf bucket.").Default("7").
 		IntVar(&cfg.HistogramBuckets)
 	flagReg("native-histogram-metric-count", "Number of native (exponential) histogram metrics to serve.").Default("0").
 		IntVar(&cfg.NativeHistogramMetricCount)
-	flagReg("summary-metric-count", "Number of summary metrics to serve.").Default("0").
+	flagReg("summary-metric-count", "Number of summary metrics to serve.  Use -summary-metric-objective-count to control number of quantile objectives. Note that the overall number of series for a single summary metric is equal to 2 (count and sum) + <summary-metric-objective-count>.").Default("0").
 		IntVar(&cfg.SummaryMetricCount)
+	flagReg("summary-metric-objective-count", "Number of objectives in the summary metrics to serve.").Default("2").
+		IntVar(&cfg.SummaryObjectives)
 
 	flagReg("label-count", "Number of labels per-metric.").Default("10").
 		IntVar(&cfg.LabelCount)
@@ -242,10 +245,22 @@ func (c *Collector) recreateMetrics(unsafeGetState readOnlyStateFn) {
 		c.nativeHistograms[id] = histogram
 	}
 
+	// Mimic some quantile objectives.
+	objectives := map[float64]float64{}
+	if c.cfg.SummaryObjectives > 0 {
+		parts := 100 / c.cfg.SummaryObjectives
+		for i := 0; i < c.cfg.SummaryObjectives; i++ {
+			q := parts * (i + 1)
+			if q == 100 {
+				q = 99
+			}
+			objectives[float64(q)/100.0] = float64(100-q) / 1000.0
+		}
+	}
 	for id := range c.summaries {
 		mName := fmt.Sprintf("avalanche_summary_metric_%s_%v_%v", strings.Repeat("m", c.cfg.MetricLength), s.metricCycle, id)
 		summary := prometheus.NewSummaryVec(
-			prometheus.SummaryOpts{Name: mName, Help: help(mName)},
+			prometheus.SummaryOpts{Name: mName, Help: help(mName), Objectives: objectives},
 			append([]string{"series_id", "cycle_id"}, c.labelKeys...),
 		)
 		c.summaries[id] = summary
