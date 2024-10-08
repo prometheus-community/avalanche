@@ -91,7 +91,7 @@ type Config struct {
 	ValueInterval, SeriesInterval, MetricInterval, SeriesChangeInterval, SeriesChangeRate int
 
 	SpikeMultiplier     float64
-	SeriesOperationMode string
+	SeriesOperationMode opMode
 	ConstLabels         []string
 }
 
@@ -143,10 +143,19 @@ func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Co
 	flagReg("series-change-rate", "The rate at which the number of active series changes over time. Applies to 'gradual-change' mode.").Default("100").
 		IntVar(&cfg.SeriesChangeRate)
 
-	flagReg("series-operation-mode", "Mode of operation: 'gradual-change', 'double-halve', 'spike'").Default("default").
-		StringVar(&cfg.SeriesOperationMode)
+	flagReg("series-operation-mode", "Mode of operation, so optional advanced behaviours on top of --value-interval, --series-interval and --metric-interval.").Default(disabledOpMode).
+		EnumVar(&cfg.SeriesOperationMode, disabledOpMode, gradualChangeOpMode, doubleHalveOpMode, spikeOpMode)
 	return cfg
 }
+
+type opMode = string
+
+const (
+	disabledOpMode      opMode = "disabled"
+	gradualChangeOpMode opMode = "gradual-change"
+	doubleHalveOpMode   opMode = "double-halve"
+	spikeOpMode         opMode = "spike"
+)
 
 func (c Config) Validate() error {
 	if c.MaxSeriesCount <= c.MinSeriesCount {
@@ -164,11 +173,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("constant label argument must have format labelName=labelValue but got %s", cLabel)
 		}
 	}
-	if c.SeriesOperationMode == "gradual-change" && c.SeriesChangeRate <= 0 {
-		return fmt.Errorf("--series-change-rate must be greater than 0, got %d", c.SeriesChangeRate)
-	}
-	if c.SeriesOperationMode == "spike" && c.SpikeMultiplier < 1 {
-		return fmt.Errorf("--spike-multiplier must be greater than or equal to 1, got %f", c.SpikeMultiplier)
+
+	switch c.SeriesOperationMode {
+	case gradualChangeOpMode:
+		if c.SeriesChangeRate <= 0 {
+			return fmt.Errorf("--series-change-rate must be greater than 0, got %d", c.SeriesChangeRate)
+		}
+	case spikeOpMode:
+		if c.SpikeMultiplier < 1 {
+			return fmt.Errorf("--spike-multiplier must be greater than or equal to 1, got %f", c.SpikeMultiplier)
+		}
+	case doubleHalveOpMode, disabledOpMode:
+	default:
+		return fmt.Errorf("unknown --series-operation-mode %v", c.SeriesOperationMode)
 	}
 	return nil
 }
@@ -511,18 +528,18 @@ func (c *Collector) Run() error {
 	c.recreateMetrics(unsafeReadOnlyGetState)
 
 	switch c.cfg.SeriesOperationMode {
-	case "double-halve":
+	case doubleHalveOpMode:
 		fmt.Printf("Starting double-halve mode; starting series: %d, change series interval: %d seconds\n", c.cfg.SeriesCount, c.cfg.SeriesChangeInterval)
 		go c.handleDoubleHalveMode(&mutableState.seriesCount, unsafeReadOnlyGetState)
 
-	case "gradual-change":
+	case gradualChangeOpMode:
 		fmt.Printf("Starting gradual-change mode; min series: %d, max series: %d, series change rate: %d, change series interval: %d seconds\n", c.cfg.MinSeriesCount, c.cfg.MaxSeriesCount, c.cfg.SeriesChangeRate, c.cfg.SeriesChangeInterval)
 		c.mu.Lock()
 		mutableState.seriesCount = c.cfg.MinSeriesCount
 		c.mu.Unlock()
 		go c.handleGradualChangeMode(&mutableState.seriesCount, unsafeReadOnlyGetState)
 
-	case "spike":
+	case spikeOpMode:
 		fmt.Printf("Starting spike mode; initial series: %d, spike multiplier: %f, spike interval: %v\n", c.cfg.SeriesCount, c.cfg.SpikeMultiplier, c.cfg.SeriesChangeInterval)
 		go c.handleSpikeMode(&mutableState.seriesCount, unsafeReadOnlyGetState, c.cfg.SpikeMultiplier)
 	}

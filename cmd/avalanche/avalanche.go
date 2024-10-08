@@ -41,7 +41,10 @@ func main() {
 	kingpin.Version(version.Print("avalanche"))
 	log.SetFlags(log.Ltime | log.Lshortfile) // Show file name and line in logs.
 	kingpin.CommandLine.Help = "avalanche - metrics test server\n" +
-		"\nSeries Operation Modes:\n" +
+		"\n" +
+		"Capable of generating metrics to server on \\metrics or send via Remote Write.\n" +
+		"\n" +
+		"\nOptionally, on top of the --value-interval, --series-interval, --metric-interval logic, you can specify advanced --series-operation-mode:\n" +
 		"  double-halve:\n" +
 		"    Alternately doubles and halves the series count at regular intervals.\n" +
 		"    Usage: ./avalanche --series-operation-mode=double-halve --series-change-interval=30 --series-count=500\n" +
