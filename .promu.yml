@@ -7,7 +7,9 @@ repository:
 build:
     binaries:
         - name: avalanche
-          path: ./cmd
+          path: ./cmd/avalanche
+        - name: mtypes
+          path: ./cmd/mtypes
     ldflags: |
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}

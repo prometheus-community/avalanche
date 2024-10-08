@@ -1,4 +1,3 @@
-#create namespace avalanche
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -7,7 +6,6 @@ spec:
   finalizers:
   - kubernetes
 ---
-#create deployment avalanche
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,18 +17,29 @@ spec:
   selector:
     matchLabels:
       app: avalanche
-  replicas: 1 # tells deployment to run 1 pods matching the template
+  replicas: 1
   template:
     metadata:
       labels:
         app: avalanche
     spec:
       containers:
-      - name: pg-avalanche
-        image: quay.io/prometheuscommunity/avalanche:main
+      - name: avalanche
+        image: quay.io/prometheuscommunity/avalanche:latest
         args:
-        - "--metric-count=1000"
-        - "--series-count=50"
+        # Example metric distribution. See cmd/mtypes on how to generate different distributions
+        # based on real scrape targets.
+        - "--gauge-metric-count=16"
+        - "--counter-metric-count=28"
+        - "--histogram-metric-count=2"
+        - "--histogram-metric-bucket-count=10" # Does not count +Inf
+        - "--native-histogram-metric-count=0"
+        - "--summary-metric-count=5" # One metric gives 2 series.
+        - "--summary-metric-objective-count=2" # One metric gives 2 series.
+        - "--series-count=10"
+        - "--value-interval=300" # Changes values every 5m
+        - "--series-interval=3600" # 1h series churn.
+        - "--metric-interval=0"
         - "--port=9001"
         ports:
         - containerPort: 9001
