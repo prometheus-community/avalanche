@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
+	github.com/google/go-cmp v0.6.0
 	github.com/nelkinda/health-go v0.0.1
 	github.com/oklog/run v1.1.0
 	github.com/prometheus/client_golang v1.20.4
