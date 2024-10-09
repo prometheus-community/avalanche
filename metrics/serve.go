@@ -136,7 +136,7 @@ func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Co
 		IntVar(&cfg.ValueInterval)
 	flagReg("series-interval", "Change series_id label values every {interval} seconds. 0 means no change.").Default("60").
 		IntVar(&cfg.SeriesInterval)
-	flagReg("metric-interval", "Change __name__ label values every {interval} seconds. 0 means no change.").Default("120").
+	flagReg("metric-interval", "Change __name__ label values every {interval} seconds. 0 means no change.").Default("0").
 		IntVar(&cfg.MetricInterval)
 	flagReg("series-change-interval", "Change the number of series every {interval} seconds. Applies to 'gradual-change', 'double-halve' and 'spike' modes. 0 means no change.").Default("30").
 		IntVar(&cfg.SeriesChangeInterval)
