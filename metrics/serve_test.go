@@ -88,6 +88,7 @@ func TestRunMetrics(t *testing.T) {
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
 		SummaryObjectives:          2,
+		SeriesOperationMode:        disabledOpMode,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -127,6 +128,7 @@ func TestRunMetrics_ValueChange_SeriesCountSame(t *testing.T) {
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
 		SummaryObjectives:          2,
+		SeriesOperationMode:        disabledOpMode,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -200,6 +202,7 @@ func TestRunMetrics_SeriesChurn(t *testing.T) {
 		NativeHistogramMetricCount: 10,
 		SummaryMetricCount:         10,
 		SummaryObjectives:          2,
+		SeriesOperationMode:        disabledOpMode,
 
 		MinSeriesCount: 0,
 		MaxSeriesCount: 1000,
@@ -258,7 +261,7 @@ func TestRunMetricsSeriesCountChangeDoubleHalve(t *testing.T) {
 		SeriesInterval:       100,
 		MetricInterval:       100,
 		SeriesChangeInterval: 3,
-		SeriesOperationMode:  "double-halve",
+		SeriesOperationMode:  doubleHalveOpMode,
 		ConstLabels:          []string{"constLabel=test"},
 	}
 	assert.NoError(t, testCfg.Validate())
@@ -302,7 +305,7 @@ func TestRunMetricsGradualChange(t *testing.T) {
 		SeriesInterval:       100,
 		MetricInterval:       100,
 		SeriesChangeInterval: 3,
-		SeriesOperationMode:  "gradual-change",
+		SeriesOperationMode:  gradualChangeOpMode,
 		ConstLabels:          []string{"constLabel=test"},
 	}
 	assert.NoError(t, testCfg.Validate())
@@ -362,7 +365,7 @@ func TestRunMetricsWithInvalidSeriesCounts(t *testing.T) {
 		SeriesInterval:       100,
 		MetricInterval:       100,
 		SeriesChangeInterval: 3,
-		SeriesOperationMode:  "gradual-change",
+		SeriesOperationMode:  gradualChangeOpMode,
 		ConstLabels:          []string{"constLabel=test"},
 	}
 	assert.Error(t, testCfg.Validate())
@@ -383,7 +386,7 @@ func TestRunMetricsSpikeChange(t *testing.T) {
 		SeriesInterval:       100,
 		MetricInterval:       100,
 		SeriesChangeInterval: 10,
-		SeriesOperationMode:  "spike",
+		SeriesOperationMode:  spikeOpMode,
 		ConstLabels:          []string{"constLabel=test"},
 	}
 	assert.NoError(t, testCfg.Validate())
