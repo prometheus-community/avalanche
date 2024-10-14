@@ -54,6 +54,7 @@ type ConfigWrite struct {
 	TLSClientConfig tls.Config
 	TenantHeader    string
 	OutOfOrder      bool
+	Concurrency     int
 }
 
 // Client for the remote write requests.
@@ -144,6 +145,8 @@ func (c *Client) write(ctx context.Context) error {
 	ticker := time.NewTicker(c.config.RequestInterval)
 	defer ticker.Stop()
 
+	concurrencyLimitCh := make(chan struct{}, c.config.Concurrency)
+
 	for i := 0; ; {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -180,7 +183,11 @@ func (c *Client) write(ctx context.Context) error {
 		start := time.Now()
 		for i := 0; i < len(tss); i += c.config.BatchSize {
 			wgMetrics.Add(1)
+			concurrencyLimitCh <- struct{}{}
 			go func(i int) {
+				defer func() {
+					<-concurrencyLimitCh
+				}()
 				defer wgMetrics.Done()
 				end := i + c.config.BatchSize
 				if end > len(tss) {
