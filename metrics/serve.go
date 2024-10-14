@@ -99,12 +99,13 @@ func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Co
 	cfg := &Config{}
 	flagReg("metric-count", "Number of gauge metrics to serve. DEPRECATED use --gauge-metric-count instead").Default("0").
 		IntVar(&cfg.MetricCount)
-	// 500 in total by default, just a healthy distribution of types.
-	flagReg("gauge-metric-count", "Number of gauge metrics to serve.").Default("200").
+	// NOTE: By default avalanche creates 500 gauges, to keep old behaviour. We could break compatibility,
+	// but it's less surprising to ask users to adjust and add more types themselves.
+	flagReg("gauge-metric-count", "Number of gauge metrics to serve.").Default("500").
 		IntVar(&cfg.GaugeMetricCount)
-	flagReg("counter-metric-count", "Number of counter metrics to serve.").Default("200").
+	flagReg("counter-metric-count", "Number of counter metrics to serve.").Default("0").
 		IntVar(&cfg.CounterMetricCount)
-	flagReg("histogram-metric-count", "Number of explicit (classic) histogram metrics to serve. Use -histogram-metric-bucket-count to control number of buckets. Note that the overall number of series for a single classic histogram metric is equal to 2 (count and sum) + <histogram-metric-bucket-count> + 1 (+Inf bucket).").Default("10").
+	flagReg("histogram-metric-count", "Number of explicit (classic) histogram metrics to serve. Use -histogram-metric-bucket-count to control number of buckets. Note that the overall number of series for a single classic histogram metric is equal to 2 (count and sum) + <histogram-metric-bucket-count> + 1 (+Inf bucket).").Default("0").
 		IntVar(&cfg.HistogramMetricCount)
 	flagReg("histogram-metric-bucket-count", "Number of explicit buckets (classic) histogram metrics, excluding +Inf bucket.").Default("7").
 		IntVar(&cfg.HistogramBuckets)
