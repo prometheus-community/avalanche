@@ -1,6 +1,13 @@
 ## unreleased
 
-* [FEATURE] add support for all metric types; deprecated --metric-count flag; --*-interval flags set to 0 means no change; added OpenMetrics support.
+## 0.6.0 / 2024-10-14
+
+* [CHANGE] (breaking) `--metric-interval` default value is now zero (not 120) #99
+* [CHANGE] (breaking) change `out-of-order` to `--remote-out-of-order` for consistency. #101
+* [CHANGE] Install command for `avalanche` moved to `cmd/avalanche/` from `cmd/` #97
+* [FEATURE] Added `mtypes` binary for metric type calculation against targets #97
+* [FEATURE] `--remote-requests-count` value -1 now makes remote-write send requests indefinitely #90
+* [FEATURE] add support for all metric types; deprecated --metric-count flag; --*-interval flags set to 0 means no change; added OpenMetrics support #80 #101
 
 ## 0.5.0 / 2024-09-15
 
