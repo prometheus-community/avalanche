@@ -75,7 +75,7 @@ func main() {
 	tlsClientInsecure := kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
 	remoteTenantHeader := kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
-	outOfOrder := kingpin.Flag("out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
+	outOfOrder := kingpin.Flag("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
 
 	kingpin.Parse()
 	if err := cfg.Validate(); err != nil {
