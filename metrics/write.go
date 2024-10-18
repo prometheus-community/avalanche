@@ -341,9 +341,8 @@ func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
 			line = scanner.Text()
 		}
 		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
+		log.Println(err)
 	}
-	if httpResp.StatusCode/100 == 5 {
-		return err
-	}
+
 	return err
 }
