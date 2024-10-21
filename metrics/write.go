@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/prometheus-community/avalanche/pkg/errors"
-	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -36,6 +35,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 const maxErrMsgLen = 256
@@ -109,20 +109,20 @@ type Client struct {
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func (config *ConfigWrite) SendRemoteWrite(ctx context.Context, gatherer prometheus.Gatherer) error {
+func (c *ConfigWrite) SendRemoteWrite(ctx context.Context, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
-		TLSClientConfig: &config.TLSClientConfig,
+		TLSClientConfig: &c.TLSClientConfig,
 	}
-	rt = &tenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
+	rt = &tenantRoundTripper{tenant: c.Tenant, tenantHeader: c.TenantHeader, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
-	c := Client{
+	client := Client{
 		client:   httpClient,
 		timeout:  time.Minute,
-		config:   config,
+		config:   c,
 		gatherer: gatherer,
 	}
-	return c.write(ctx)
+	return client.write(ctx)
 }
 
 // Add the tenant ID header
