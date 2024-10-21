@@ -1,3 +1,5 @@
 ./avalanche
 .build/
 .idea/
+mtypes
+avalanche

@@ -15,7 +15,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -62,58 +61,33 @@ func main() {
 
 	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
 	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
-	remoteURL := kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
-	remoteConcurrencyLimit := kingpin.Flag("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").Int()
-	remoteBatchSize := kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
-	remoteRequestCount := kingpin.Flag("remote-requests-count", "How many requests to send in total to the remote_write API. Set to -1 to run indefinitely.").Default("100").Int()
-	remoteReqsInterval := kingpin.Flag("remote-write-interval", "delay between each remote write request.").Default("100ms").Duration()
-	remoteTenant := kingpin.Flag("remote-tenant", "Tenant ID to include in remote_write send").Default("0").String()
-	tlsClientInsecure := kingpin.Flag("tls-client-insecure", "Skip certificate check on tls connection").Default("false").Bool()
-	remoteTenantHeader := kingpin.Flag("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").String()
-	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
-	outOfOrder := kingpin.Flag("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").Bool()
+	remoteWriteConfig := metrics.NewRemoteWriteConfigFromFlags(kingpin.Flag)
 
 	kingpin.Parse()
 	if err := cfg.Validate(); err != nil {
 		kingpin.FatalUsage("configuration error: %v", err)
 	}
-	log.Println("initializing avalanche...")
 
 	collector := metrics.NewCollector(*cfg)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collector)
+	remoteWriteConfig.UpdateNotify = collector.UpdateNotifyCh()
+
+	if err := remoteWriteConfig.Validate(); err != nil {
+		kingpin.FatalUsage("remote write config validation failed: %v", err)
+	}
+
+	log.Println("initializing avalanche...")
 
 	var g run.Group
 	g.Add(run.SignalHandler(context.Background(), os.Interrupt, syscall.SIGTERM))
 	g.Add(collector.Run, collector.Stop)
 
 	// One-off remote write send mode.
-	if *remoteURL != nil {
-		if (**remoteURL).Host == "" || (**remoteURL).Scheme == "" {
-			log.Fatal("remote host and scheme can't be empty")
-		}
-		if *remoteBatchSize <= 0 {
-			log.Fatal("remote send batch size should be more than zero")
-		}
-
-		config := &metrics.ConfigWrite{
-			URL:             **remoteURL,
-			RequestInterval: *remoteReqsInterval,
-			BatchSize:       *remoteBatchSize,
-			RequestCount:    *remoteRequestCount,
-			UpdateNotify:    collector.UpdateNotifyCh(),
-			Concurrency:     *remoteConcurrencyLimit,
-			Tenant:          *remoteTenant,
-			TLSClientConfig: tls.Config{
-				InsecureSkipVerify: *tlsClientInsecure,
-			},
-			TenantHeader: *remoteTenantHeader,
-			OutOfOrder:   *outOfOrder,
-		}
-
+	if remoteWriteConfig.URL != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(func() error {
-			if err := metrics.SendRemoteWrite(ctx, config, reg); err != nil {
+			if err := remoteWriteConfig.SendRemoteWrite(ctx, reg); err != nil {
 				return err
 			}
 			return nil // One-off.
