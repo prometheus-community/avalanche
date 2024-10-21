@@ -18,13 +18,9 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
-	"strconv"
-	"sync"
 	"syscall"
-	"time"
 
 	"github.com/nelkinda/health-go"
 	"github.com/oklog/run"
@@ -34,7 +30,6 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/prometheus-community/avalanche/metrics"
-	"github.com/prometheus-community/avalanche/pkg/download"
 )
 
 func main() {
@@ -68,9 +63,6 @@ func main() {
 	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
 	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
 	remoteURL := kingpin.Flag("remote-url", "URL to send samples via remote_write API.").URL()
-	// TODO(bwplotka): Kill pprof feature, you can install OSS continuous profiling easily instead.
-	remotePprofURLs := kingpin.Flag("remote-pprof-urls", "a list of urls to download pprofs during the remote write: --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/heap --remote-pprof-urls=http://127.0.0.1:10902/debug/pprof/profile").URLList()
-	remotePprofInterval := kingpin.Flag("remote-pprof-interval", "how often to download pprof profiles. When not provided it will download a profile once before the end of the test.").Duration()
 	remoteConcurrencyLimit := kingpin.Flag("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").Int()
 	remoteBatchSize := kingpin.Flag("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").Int()
 	remoteRequestCount := kingpin.Flag("remote-requests-count", "How many requests to send in total to the remote_write API. Set to -1 to run indefinitely.").Default("100").Int()
@@ -119,47 +111,10 @@ func main() {
 			OutOfOrder:   *outOfOrder,
 		}
 
-		// Collect Pprof during the write only if not collecting within a regular interval.
-		if *remotePprofInterval == 0 {
-			config.PprofURLs = *remotePprofURLs
-		}
-
-		var (
-			wg   sync.WaitGroup
-			done = make(chan struct{})
-		)
-		if *remotePprofInterval > 0 {
-			if len(*remotePprofURLs) == 0 {
-				log.Fatal("remote profiling interval specified without any remote pprof urls")
-			}
-			suffix := rand.Intn(1000)
-			go func() {
-				ticker := time.NewTicker(*remotePprofInterval)
-				var dur time.Duration
-			loop:
-				for {
-					<-ticker.C
-					select {
-					case <-done: // Prevents a panic when calling wg.Add(1) after calling wg.Wait().
-						break loop
-					default:
-					}
-					dur += *remotePprofInterval
-					wg.Add(1)
-					download.URLs(*remotePprofURLs, strconv.Itoa(suffix)+"-"+dur.String())
-					wg.Done()
-				}
-			}()
-		}
-
 		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(func() error {
 			if err := metrics.SendRemoteWrite(ctx, config, reg); err != nil {
 				return err
-			}
-			if *remotePprofInterval > 0 {
-				done <- struct{}{}
-				wg.Wait()
 			}
 			return nil // One-off.
 		}, func(error) { cancel() })
