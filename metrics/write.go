@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus-community/avalanche/pkg/download"
 	"github.com/prometheus-community/avalanche/pkg/errors"
 
 	"github.com/gogo/protobuf/proto"
@@ -129,7 +128,6 @@ func (c *Client) write(ctx context.Context) error {
 		totalSamplesAct int
 		mtx             sync.Mutex
 		wgMetrics       sync.WaitGroup
-		wgPprof         sync.WaitGroup
 		merr            = &errors.MultiError{}
 	)
 
@@ -153,19 +151,10 @@ func (c *Client) write(ctx context.Context) error {
 		}
 
 		if !shouldRunForever {
-			if i < c.config.RequestCount {
+			if i >= c.config.RequestCount {
 				break
 			}
 			i++
-			// Download the pprofs during half of the iteration to get avarege readings.
-			// Do that only when it is not set to take profiles at a given interval.
-			if len(c.config.PprofURLs) > 0 && i == c.config.RequestCount/2 {
-				wgPprof.Add(1)
-				go func() {
-					download.URLs(c.config.PprofURLs, time.Now().Format("2-Jan-2006-15:04:05"))
-					wgPprof.Done()
-				}()
-			}
 		}
 
 		<-ticker.C
@@ -212,7 +201,6 @@ func (c *Client) write(ctx context.Context) error {
 			return merr.Err()
 		}
 	}
-	wgPprof.Wait()
 	if c.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
