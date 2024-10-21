@@ -57,7 +57,7 @@ type ConfigWrite struct {
 	Concurrency     int
 }
 
-func NewRemoteWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
+func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
 	cfg := &ConfigWrite{}
 	flagReg("remote-url", "URL to send samples via remote_write API.").
 		URLVar(&cfg.URL)

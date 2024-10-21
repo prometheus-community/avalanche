@@ -61,21 +61,20 @@ func main() {
 
 	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
 	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
-	remoteWriteConfig := metrics.NewRemoteWriteConfigFromFlags(kingpin.Flag)
+	remoteWriteConfig := metrics.NewWriteConfigFromFlags(kingpin.Flag)
 
 	kingpin.Parse()
 	if err := cfg.Validate(); err != nil {
 		kingpin.FatalUsage("configuration error: %v", err)
+	}
+	if err := remoteWriteConfig.Validate(); err != nil {
+		kingpin.FatalUsage("remote write config validation failed: %v", err)
 	}
 
 	collector := metrics.NewCollector(*cfg)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collector)
 	remoteWriteConfig.UpdateNotify = collector.UpdateNotifyCh()
-
-	if err := remoteWriteConfig.Validate(); err != nil {
-		kingpin.FatalUsage("remote write config validation failed: %v", err)
-	}
 
 	log.Println("initializing avalanche...")
 
