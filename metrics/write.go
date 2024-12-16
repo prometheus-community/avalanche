@@ -109,17 +109,17 @@ type Client struct {
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func (c *ConfigWrite) SendRemoteWrite(ctx context.Context, gatherer prometheus.Gatherer) error {
+func SendRemoteWrite(ctx context.Context, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
-		TLSClientConfig: &c.TLSClientConfig,
+		TLSClientConfig: &cfg.TLSClientConfig,
 	}
-	rt = &tenantRoundTripper{tenant: c.Tenant, tenantHeader: c.TenantHeader, rt: rt}
+	rt = &tenantRoundTripper{tenant: cfg.Tenant, tenantHeader: cfg.TenantHeader, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
 	client := Client{
 		client:   httpClient,
 		timeout:  time.Minute,
-		config:   c,
+		config:   cfg,
 		gatherer: gatherer,
 	}
 	return client.write(ctx)

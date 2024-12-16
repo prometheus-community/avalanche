@@ -61,20 +61,20 @@ func main() {
 
 	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
 	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
-	remoteWriteConfig := metrics.NewWriteConfigFromFlags(kingpin.Flag)
+	writeCfg := metrics.NewWriteConfigFromFlags(kingpin.Flag)
 
 	kingpin.Parse()
 	if err := cfg.Validate(); err != nil {
 		kingpin.FatalUsage("configuration error: %v", err)
 	}
-	if err := remoteWriteConfig.Validate(); err != nil {
+	if err := writeCfg.Validate(); err != nil {
 		kingpin.FatalUsage("remote write config validation failed: %v", err)
 	}
 
 	collector := metrics.NewCollector(*cfg)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collector)
-	remoteWriteConfig.UpdateNotify = collector.UpdateNotifyCh()
+	writeCfg.UpdateNotify = collector.UpdateNotifyCh()
 
 	log.Println("initializing avalanche...")
 
@@ -83,10 +83,10 @@ func main() {
 	g.Add(collector.Run, collector.Stop)
 
 	// One-off remote write send mode.
-	if remoteWriteConfig.URL != nil {
+	if writeCfg.URL != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(func() error {
-			if err := remoteWriteConfig.SendRemoteWrite(ctx, reg); err != nil {
+			if err := metrics.SendRemoteWrite(ctx, writeCfg, reg); err != nil {
 				return err
 			}
 			return nil // One-off.
