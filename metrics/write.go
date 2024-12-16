@@ -35,6 +35,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 const maxErrMsgLen = 256
@@ -43,7 +44,7 @@ var userAgent = "avalanche"
 
 // ConfigWrite for the remote write requests.
 type ConfigWrite struct {
-	URL             url.URL
+	URL             *url.URL
 	RequestInterval time.Duration
 	BatchSize,
 	RequestCount int
@@ -56,6 +57,48 @@ type ConfigWrite struct {
 	Concurrency     int
 }
 
+func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
+	cfg := &ConfigWrite{}
+	flagReg("remote-url", "URL to send samples via remote_write API.").
+		URLVar(&cfg.URL)
+	flagReg("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").
+		IntVar(&cfg.Concurrency)
+	flagReg("remote-batch-size", "how many samples to send with each remote_write API request.").Default("2000").
+		IntVar(&cfg.BatchSize)
+	flagReg("remote-requests-count", "How many requests to send in total to the remote_write API. Set to -1 to run indefinitely.").Default("100").
+		IntVar(&cfg.RequestCount)
+	flagReg("remote-write-interval", "delay between each remote write request.").Default("100ms").
+		DurationVar(&cfg.RequestInterval)
+	flagReg("remote-tenant", "Tenant ID to include in remote_write send").Default("0").
+		StringVar(&cfg.Tenant)
+	flagReg("tls-client-insecure", "Skip certificate check on tls connection").Default("false").
+		BoolVar(&cfg.TLSClientConfig.InsecureSkipVerify)
+	flagReg("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").
+		StringVar(&cfg.TenantHeader)
+	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
+	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").
+		BoolVar(&cfg.OutOfOrder)
+
+	return cfg
+}
+
+func (c *ConfigWrite) Validate() error {
+	if c.URL != nil {
+		if c.URL.Host == "" || c.URL.Scheme == "" {
+			return fmt.Errorf("remote host and scheme can't be empty")
+		}
+
+		if c.BatchSize <= 0 {
+			return fmt.Errorf("remote send batch sizemust be greater than 0, got %v", c.BatchSize)
+		}
+
+		if c.RequestInterval <= 0 {
+			return fmt.Errorf("--remote-write-interval must be greater than 0, got %v", c.RequestInterval)
+		}
+	}
+	return nil
+}
+
 // Client for the remote write requests.
 type Client struct {
 	client   *http.Client
@@ -66,20 +109,20 @@ type Client struct {
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(ctx context.Context, config *ConfigWrite, gatherer prometheus.Gatherer) error {
+func SendRemoteWrite(ctx context.Context, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
-		TLSClientConfig: &config.TLSClientConfig,
+		TLSClientConfig: &cfg.TLSClientConfig,
 	}
-	rt = &tenantRoundTripper{tenant: config.Tenant, tenantHeader: config.TenantHeader, rt: rt}
+	rt = &tenantRoundTripper{tenant: cfg.Tenant, tenantHeader: cfg.TenantHeader, rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
-	c := Client{
+	client := Client{
 		client:   httpClient,
 		timeout:  time.Minute,
-		config:   config,
+		config:   cfg,
 		gatherer: gatherer,
 	}
-	return c.write(ctx)
+	return client.write(ctx)
 }
 
 // Add the tenant ID header
