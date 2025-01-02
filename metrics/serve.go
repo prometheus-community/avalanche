@@ -505,6 +505,7 @@ func (c *Collector) Run() error {
 		labelValues = append(labelValues, split[1])
 	}
 
+	c.labelKeys = labelKeys
 	mutableState := &metricState{seriesCount: c.cfg.SeriesCount, labelValues: labelValues}
 	// unsafe means you need to lock c.mu to use it.
 	unsafeReadOnlyGetState := func() metricState { return *mutableState }
