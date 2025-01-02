@@ -414,3 +414,49 @@ func TestRunMetricsSpikeChange(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectorLabels(t *testing.T) {
+	testCfg := Config{
+		GaugeMetricCount:    1,
+		LabelCount:          2,
+		SeriesCount:         100,
+		MaxSeriesCount:      30,
+		MinSeriesCount:      10,
+		SpikeMultiplier:     1.5,
+		MetricLength:        1,
+		LabelLength:         1,
+		SeriesOperationMode: spikeOpMode,
+		ConstLabels:         []string{"constLabel=test"},
+	}
+
+	assert.NoError(t, testCfg.Validate())
+
+	reg := prometheus.NewRegistry()
+	col := NewCollector(testCfg)
+	reg.MustRegister(col)
+
+	go col.Run()
+	t.Cleanup(func() {
+		col.Stop(nil)
+	})
+
+	time.Sleep((2 * time.Second))
+	metricsFamilies, err := reg.Gather()
+	assert.NotEmpty(t, metricsFamilies)
+	assert.NoError(t, err)
+
+	for _, mf := range metricsFamilies {
+		for _, m := range mf.Metric {
+			labels := m.GetLabel()
+			labelMap := make(map[string]string)
+			for _, l := range labels {
+				labelMap[l.GetName()] = l.GetValue()
+			}
+			assert.Equal(t, "test", labelMap["constLabel"])
+			assert.Contains(t, labelMap, "label_key_k_0")
+			assert.Contains(t, labelMap, "label_key_k_1")
+			assert.Contains(t, labelMap, "series_id")
+			assert.Contains(t, labelMap, "cycle_id")
+		}
+	}
+}
