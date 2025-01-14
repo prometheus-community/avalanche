@@ -49,10 +49,6 @@ type Collector struct {
 // NewCollector returns Prometheus collector that can be registered in registry
 // that handles metric creation and changes, based on the given configuration.
 func NewCollector(cfg Config) *Collector {
-	if cfg.GaugeMetricCount == 0 {
-		cfg.GaugeMetricCount = cfg.MetricCount // Handle deprecated field.
-	}
-
 	c := &Collector{
 		cfg:            cfg,
 		valGen:         rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -80,7 +76,7 @@ func (c *Collector) UpdateNotifyCh() chan struct{} {
 }
 
 type Config struct {
-	MetricCount, GaugeMetricCount, CounterMetricCount, HistogramMetricCount, NativeHistogramMetricCount, SummaryMetricCount int
+	GaugeMetricCount, CounterMetricCount, HistogramMetricCount, NativeHistogramMetricCount, SummaryMetricCount int
 
 	HistogramBuckets, SummaryObjectives int
 
@@ -97,8 +93,6 @@ type Config struct {
 
 func NewConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *Config {
 	cfg := &Config{}
-	flagReg("metric-count", "Number of gauge metrics to serve. DEPRECATED use --gauge-metric-count instead").Default("0").
-		IntVar(&cfg.MetricCount)
 	// NOTE: By default avalanche creates 500 gauges, to keep old behaviour. We could break compatibility,
 	// but it's less surprising to ask users to adjust and add more types themselves.
 	flagReg("gauge-metric-count", "Number of gauge metrics to serve.").Default("500").
@@ -164,9 +158,6 @@ func (c Config) Validate() error {
 	}
 	if c.MinSeriesCount < 0 {
 		return fmt.Errorf("--min-series-count must be 0 or higher, got %d", c.MinSeriesCount)
-	}
-	if c.MetricCount > 0 && c.GaugeMetricCount > 0 {
-		return fmt.Errorf("--metric-count (set to %v) is deprecated and it means the same as --gauge-metric-count (set to %v); both can't be used in the same time", c.MetricCount, c.GaugeMetricCount)
 	}
 	for _, cLabel := range c.ConstLabels {
 		split := strings.Split(cLabel, "=")
