@@ -514,12 +514,12 @@ func (c *Collector) Run() error {
 		labelValues = append(labelValues, split[1])
 	}
 
-	c.labelKeys = labelKeys
 	mutableState := &metricState{seriesCount: c.cfg.SeriesCount, labelValues: labelValues}
 	// unsafe means you need to lock c.mu to use it.
 	unsafeReadOnlyGetState := func() metricState { return *mutableState }
 
 	c.mu.Lock() // Just to make race detector happy, not really needed in practice.
+	c.labelKeys = labelKeys
 	c.gauges = make([]*prometheus.GaugeVec, c.cfg.GaugeMetricCount)
 	c.counters = make([]*prometheus.CounterVec, c.cfg.CounterMetricCount)
 	c.histograms = make([]*prometheus.HistogramVec, c.cfg.HistogramMetricCount)
