@@ -441,7 +441,7 @@ func TestCollectorLabels(t *testing.T) {
 	})
 
 	select {
-	case <- col.updateNotifyCh:
+	case <-col.updateNotifyCh:
 		metricsFamilies, err := reg.Gather()
 		assert.NotEmpty(t, metricsFamilies)
 		assert.NoError(t, err)
@@ -460,7 +460,7 @@ func TestCollectorLabels(t *testing.T) {
 				assert.Contains(t, labelMap, "cycle_id")
 			}
 		}
-	case <- time.After(2 * time.Second):
-		t.Fail();
+	case <-time.After(2 * time.Second):
+		t.Fail()
 	}
 }
