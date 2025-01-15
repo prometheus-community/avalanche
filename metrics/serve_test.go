@@ -440,23 +440,27 @@ func TestCollectorLabels(t *testing.T) {
 		col.Stop(nil)
 	})
 
-	time.Sleep((2 * time.Second))
-	metricsFamilies, err := reg.Gather()
-	assert.NotEmpty(t, metricsFamilies)
-	assert.NoError(t, err)
+	select {
+	case <- col.updateNotifyCh:
+		metricsFamilies, err := reg.Gather()
+		assert.NotEmpty(t, metricsFamilies)
+		assert.NoError(t, err)
 
-	for _, mf := range metricsFamilies {
-		for _, m := range mf.Metric {
-			labels := m.GetLabel()
-			labelMap := make(map[string]string)
-			for _, l := range labels {
-				labelMap[l.GetName()] = l.GetValue()
+		for _, mf := range metricsFamilies {
+			for _, m := range mf.Metric {
+				labels := m.GetLabel()
+				labelMap := make(map[string]string)
+				for _, l := range labels {
+					labelMap[l.GetName()] = l.GetValue()
+				}
+				assert.Equal(t, "test", labelMap["constLabel"])
+				assert.Contains(t, labelMap, "label_key_k_0")
+				assert.Contains(t, labelMap, "label_key_k_1")
+				assert.Contains(t, labelMap, "series_id")
+				assert.Contains(t, labelMap, "cycle_id")
 			}
-			assert.Equal(t, "test", labelMap["constLabel"])
-			assert.Contains(t, labelMap, "label_key_k_0")
-			assert.Contains(t, labelMap, "label_key_k_1")
-			assert.Contains(t, labelMap, "series_id")
-			assert.Contains(t, labelMap, "cycle_id")
 		}
+	case <- time.After(2 * time.Second):
+		t.Fail();
 	}
 }
