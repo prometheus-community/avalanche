@@ -14,13 +14,11 @@
 package metrics
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -28,19 +26,15 @@ import (
 	"time"
 
 	"github.com/prometheus-community/avalanche/pkg/errors"
+	"github.com/prometheus/client_golang/exp/api/remote"
+	writev2 "github.com/prometheus/client_golang/exp/api/remote/genproto/v2"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
-
-const maxErrMsgLen = 256
-
-var userAgent = "avalanche"
 
 // ConfigWrite for the remote write requests.
 type ConfigWrite struct {
@@ -55,11 +49,12 @@ type ConfigWrite struct {
 	TenantHeader    string
 	OutOfOrder      bool
 	Concurrency     int
+	WriteV2         bool
 }
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
 	cfg := &ConfigWrite{}
-	flagReg("remote-url", "URL to send samples via remote_write API.").
+	flagReg("remote-url", "URL to send samples via remote_write API. By default, path is set to api/v1/write").
 		URLVar(&cfg.URL)
 	flagReg("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").
 		IntVar(&cfg.Concurrency)
@@ -78,6 +73,8 @@ func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
 	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").
 		BoolVar(&cfg.OutOfOrder)
+	flagReg("remote-write-v2", "Send remote write v2 format requests.").Default("false").
+		BoolVar(&cfg.WriteV2)
 
 	return cfg
 }
@@ -101,27 +98,46 @@ func (c *ConfigWrite) Validate() error {
 
 // Client for the remote write requests.
 type Client struct {
-	client   *http.Client
-	timeout  time.Duration
-	config   *ConfigWrite
-	gatherer prometheus.Gatherer
+	client    *http.Client
+	logger    *slog.Logger
+	timeout   time.Duration
+	config    *ConfigWrite
+	gatherer  prometheus.Gatherer
+	remoteAPI *remote.API
 }
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(ctx context.Context, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
+func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &cfg.TLSClientConfig,
 	}
 	rt = &tenantRoundTripper{tenant: cfg.Tenant, tenantHeader: cfg.TenantHeader, rt: rt}
+	rt = &userAgentRoundTripper{userAgent: "avalanche", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
-	client := Client{
-		client:   httpClient,
-		timeout:  time.Minute,
-		config:   cfg,
-		gatherer: gatherer,
+	remoteAPI, err := remote.NewAPI(
+		httpClient,
+		cfg.URL.String(),
+		remote.WithAPILogger(logger.With("component", "remote_write_api")),
+	)
+	if err != nil {
+		return err
 	}
+
+	client := Client{
+		client:    httpClient,
+		logger:    logger,
+		timeout:   time.Minute,
+		config:    cfg,
+		gatherer:  gatherer,
+		remoteAPI: remoteAPI,
+	}
+
+	if cfg.WriteV2 {
+		return client.writeV2(ctx)
+	}
+
 	return client.write(ctx)
 }
 
@@ -138,6 +154,18 @@ type tenantRoundTripper struct {
 	rt           http.RoundTripper
 }
 
+// User agent round tripper
+type userAgentRoundTripper struct {
+	userAgent string
+	rt        http.RoundTripper
+}
+
+func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = cloneRequest(req)
+	req.Header.Set("User-Agent", rt.userAgent)
+	return rt.rt.RoundTrip(req)
+}
+
 // cloneRequest returns a clone of the provided *http.Request.
 // The clone is a shallow copy of the struct and its Header map.
 func cloneRequest(r *http.Request) *http.Request {
@@ -150,6 +178,113 @@ func cloneRequest(r *http.Request) *http.Request {
 		r2.Header[k] = s
 	}
 	return r2
+}
+
+func (c *Client) writeV2(ctx context.Context) error {
+	select {
+	// Wait for update first as write and collector.Run runs simultaneously.
+	case <-c.config.UpdateNotify:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	tss, st, err := collectMetricsV2(c.gatherer, c.config.OutOfOrder)
+	if err != nil {
+		return err
+	}
+
+	var (
+		totalTime       time.Duration
+		totalSamplesExp = len(tss) * c.config.RequestCount
+		totalSamplesAct int
+		mtx             sync.Mutex
+		wgMetrics       sync.WaitGroup
+		merr            = &errors.MultiError{}
+	)
+
+	shouldRunForever := c.config.RequestCount == -1
+	if shouldRunForever {
+		log.Printf("Sending: %v timeseries infinitely, %v timeseries per request, %v delay between requests\n",
+			len(tss), c.config.BatchSize, c.config.RequestInterval)
+	} else {
+		log.Printf("Sending: %v timeseries, %v times, %v timeseries per request, %v delay between requests\n",
+			len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+	}
+
+	ticker := time.NewTicker(c.config.RequestInterval)
+	defer ticker.Stop()
+
+	concurrencyLimitCh := make(chan struct{}, c.config.Concurrency)
+
+	for i := 0; ; {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if !shouldRunForever {
+			if i >= c.config.RequestCount {
+				break
+			}
+			i++
+		}
+
+		<-ticker.C
+		select {
+		case <-c.config.UpdateNotify:
+			log.Println("updating remote write metrics")
+			tss, st, err = collectMetricsV2(c.gatherer, c.config.OutOfOrder)
+			if err != nil {
+				merr.Add(err)
+			}
+		default:
+			tss = updateTimestampsV2(tss)
+		}
+
+		start := time.Now()
+		for i := 0; i < len(tss); i += c.config.BatchSize {
+			wgMetrics.Add(1)
+			concurrencyLimitCh <- struct{}{}
+			go func(i int) {
+				defer func() {
+					<-concurrencyLimitCh
+				}()
+				defer wgMetrics.Done()
+				end := i + c.config.BatchSize
+				if end > len(tss) {
+					end = len(tss)
+				}
+				req := &writev2.Request{
+					Timeseries: tss[i:end],
+					Symbols:    st.Symbols(), // We pass full symbols table to each request for now
+				}
+
+				if _, err := c.remoteAPI.Write(ctx, req); err != nil {
+					merr.Add(err)
+					c.logger.Error("error writing metrics", "error", err)
+					return
+				}
+
+				mtx.Lock()
+				totalSamplesAct += len(tss[i:end])
+				mtx.Unlock()
+			}(i)
+		}
+		wgMetrics.Wait()
+		totalTime += time.Since(start)
+		if merr.Count() > 20 {
+			merr.Add(fmt.Errorf("too many errors"))
+			return merr.Err()
+		}
+	}
+	if c.config.RequestCount*len(tss) != totalSamplesAct {
+		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
+	}
+	c.logger.Info("metrics summary",
+		"total_time", totalTime.Round(time.Second),
+		"total_samples", totalSamplesAct,
+		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),
+		"errors", merr.Count())
+	return merr.Err()
 }
 
 func (c *Client) write(ctx context.Context) error {
@@ -228,10 +363,13 @@ func (c *Client) write(ctx context.Context) error {
 				req := &prompb.WriteRequest{
 					Timeseries: tss[i:end],
 				}
-				if err := c.Store(context.TODO(), req); err != nil {
+
+				if _, err := c.remoteAPI.Write(ctx, req); err != nil {
 					merr.Add(err)
+					c.logger.Error("error writing metrics", "error", err)
 					return
 				}
+
 				mtx.Lock()
 				totalSamplesAct += len(tss[i:end])
 				mtx.Unlock()
@@ -247,8 +385,20 @@ func (c *Client) write(ctx context.Context) error {
 	if c.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
+	c.logger.Info("metrics summary",
+		"total_time", totalTime.Round(time.Second),
+		"total_samples", totalSamplesAct,
+		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),
+		"errors", merr.Count())
 	return merr.Err()
+}
+
+func updateTimestampsV2(tss []*writev2.TimeSeries) []*writev2.TimeSeries {
+	now := time.Now().UnixMilli()
+	for i := range tss {
+		tss[i].Samples[0].Timestamp = now
+	}
+	return tss
 }
 
 func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
@@ -257,6 +407,18 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 		tss[i].Samples[0].Timestamp = t
 	}
 	return tss
+}
+
+func collectMetricsV2(gatherer prometheus.Gatherer, outOfOrder bool) ([]*writev2.TimeSeries, writev2.SymbolsTable, error) {
+	metricFamilies, err := gatherer.Gather()
+	if err != nil {
+		return nil, writev2.SymbolsTable{}, err
+	}
+	tss, st := ToTimeSeriesSliceV2(metricFamilies)
+	if outOfOrder {
+		tss = shuffleTimestampsV2(tss)
+	}
+	return tss, st, nil
 }
 
 func collectMetrics(gatherer prometheus.Gatherer, outOfOrder bool) ([]prompb.TimeSeries, error) {
@@ -269,6 +431,16 @@ func collectMetrics(gatherer prometheus.Gatherer, outOfOrder bool) ([]prompb.Tim
 		tss = shuffleTimestamps(tss)
 	}
 	return tss, nil
+}
+
+func shuffleTimestampsV2(tss []*writev2.TimeSeries) []*writev2.TimeSeries {
+	now := time.Now().UnixMilli()
+	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
+	for i := range tss {
+		offset := offsets[i%len(offsets)]
+		tss[i].Samples[0].Timestamp = now + offset
+	}
+	return tss
 }
 
 func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
@@ -318,6 +490,47 @@ func ToTimeSeriesSlice(metricFamilies []*dto.MetricFamily) []prompb.TimeSeries {
 	return tss
 }
 
+func ToTimeSeriesSliceV2(metricFamilies []*dto.MetricFamily) ([]*writev2.TimeSeries, writev2.SymbolsTable) {
+	st := writev2.NewSymbolTable()
+	timestamp := int64(model.Now())
+	tss := make([]*writev2.TimeSeries, 0, len(metricFamilies)*10)
+
+	skippedSamples := 0
+	for _, metricFamily := range metricFamilies {
+		for _, metric := range metricFamily.Metric {
+			labels := prompbLabels(*metricFamily.Name, metric.Label)
+			labelRefs := make([]uint32, 0, len(labels))
+			for _, label := range labels {
+				labelRefs = append(labelRefs, st.Symbolize(label.Name))
+				labelRefs = append(labelRefs, st.Symbolize(label.Value))
+			}
+			ts := &writev2.TimeSeries{
+				LabelsRefs: labelRefs,
+			}
+			switch *metricFamily.Type {
+			case dto.MetricType_COUNTER:
+				ts.Samples = []*writev2.Sample{{
+					Value:     *metric.Counter.Value,
+					Timestamp: timestamp,
+				}}
+				tss = append(tss, ts)
+			case dto.MetricType_GAUGE:
+				ts.Samples = []*writev2.Sample{{
+					Value:     *metric.Gauge.Value,
+					Timestamp: timestamp,
+				}}
+				tss = append(tss, ts)
+			default:
+				skippedSamples++
+			}
+		}
+	}
+	if skippedSamples > 0 {
+		log.Printf("WARN: Skipping %v samples; sending only %v samples, given only gauge and counters are currently implemented\n", skippedSamples, len(tss))
+	}
+	return tss, st
+}
+
 func prompbLabels(name string, label []*dto.LabelPair) []prompb.Label {
 	ret := make([]prompb.Label, 0, len(label)+1)
 	ret = append(ret, prompb.Label{
@@ -334,46 +547,4 @@ func prompbLabels(name string, label []*dto.LabelPair) []prompb.Label {
 		return ret[i].Name < ret[j].Name
 	})
 	return ret
-}
-
-// Store sends a batch of samples to the HTTP endpoint.
-func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return err
-	}
-
-	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.config.URL.String(), bytes.NewReader(compressed))
-	if err != nil {
-		// Errors from NewRequest are from unparseable URLs, so are not
-		// recoverable.
-		return err
-	}
-	httpReq.Header.Add("Content-Encoding", "snappy")
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-	httpReq.Header.Set("User-Agent", userAgent)
-	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
-	httpReq = httpReq.WithContext(ctx)
-
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
-
-	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
-	if err != nil {
-		return err
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode/100 != 2 {
-		scanner := bufio.NewScanner(io.LimitReader(httpResp.Body, maxErrMsgLen))
-		line := ""
-		if scanner.Scan() {
-			line = scanner.Text()
-		}
-		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
-		log.Println(err)
-	}
-
-	return err
 }
