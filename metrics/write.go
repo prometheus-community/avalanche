@@ -48,13 +48,13 @@ type ConfigWrite struct {
 	RequestInterval time.Duration
 	BatchSize,
 	RequestCount int
-	UpdateNotify    chan struct{}
-	PprofURLs       []*url.URL
-	Tenant          string
-	TLSClientConfig tls.Config
-	TenantHeader    string
-	OutOfOrder      bool
-	Concurrency     int
+	UpdateNotify      chan struct{}
+	PprofURLs         []*url.URL
+	Tenant            string
+	TLSClientConfig   tls.Config
+	TenantHeader      string
+	OutOfOrderMinTime time.Duration
+	Concurrency       int
 }
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
@@ -76,8 +76,8 @@ func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause
 	flagReg("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").
 		StringVar(&cfg.TenantHeader)
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
-	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").
-		BoolVar(&cfg.OutOfOrder)
+	flagReg("remote-out-of-order.min-time", "Specifies the minimum duration by which out-of-order timestamps can be accepted in remote write requests.").Default("0").
+		DurationVar(&cfg.OutOfOrderMinTime)
 
 	return cfg
 }
@@ -160,7 +160,7 @@ func (c *Client) write(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	tss, err := collectMetrics(c.gatherer, c.config.OutOfOrder)
+	tss, err := collectMetrics(c.gatherer, c.config.OutOfOrderMinTime)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (c *Client) write(ctx context.Context) error {
 		select {
 		case <-c.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics(c.gatherer, c.config.OutOfOrder)
+			tss, err = collectMetrics(c.gatherer, c.config.OutOfOrderMinTime)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -259,25 +259,25 @@ func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
 	return tss
 }
 
-func collectMetrics(gatherer prometheus.Gatherer, outOfOrder bool) ([]prompb.TimeSeries, error) {
+func collectMetrics(gatherer prometheus.Gatherer, outOfOrderMinTime time.Duration) ([]prompb.TimeSeries, error) {
 	metricFamilies, err := gatherer.Gather()
 	if err != nil {
 		return nil, err
 	}
 	tss := ToTimeSeriesSlice(metricFamilies)
-	if outOfOrder {
-		tss = shuffleTimestamps(tss)
+	if outOfOrderMinTime != 0 {
+		tss = shuffleTimestamps(outOfOrderMinTime, tss)
 	}
 	return tss, nil
 }
 
-func shuffleTimestamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
+func shuffleTimestamps(minTime time.Duration, tss []prompb.TimeSeries) []prompb.TimeSeries {
 	now := time.Now().UnixMilli()
-	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
+	interval := minTime.Milliseconds() / int64(len(tss))
 
 	for i := range tss {
-		offset := offsets[i%len(offsets)]
-		tss[i].Samples[0].Timestamp = now + offset
+		offset := int64(i) * interval
+		tss[i].Samples[0].Timestamp = now - offset
 	}
 	return tss
 }
