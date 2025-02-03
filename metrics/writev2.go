@@ -20,11 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus-community/avalanche/pkg/errors"
 	writev2 "github.com/prometheus/client_golang/exp/api/remote/genproto/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+
+	"github.com/prometheus-community/avalanche/pkg/errors"
 )
 
 func (c *Client) writeV2(ctx context.Context) error {
