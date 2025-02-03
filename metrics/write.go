@@ -14,33 +14,26 @@
 package metrics
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/prometheus-community/avalanche/pkg/errors"
-
-	"github.com/gogo/protobuf/proto"
-	"github.com/golang/snappy"
+	"github.com/prometheus/client_golang/exp/api/remote"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/prometheus-community/avalanche/pkg/errors"
 )
-
-const maxErrMsgLen = 256
-
-var userAgent = "avalanche"
 
 // ConfigWrite for the remote write requests.
 type ConfigWrite struct {
@@ -55,11 +48,12 @@ type ConfigWrite struct {
 	TenantHeader    string
 	OutOfOrder      bool
 	Concurrency     int
+	WriteV2         bool
 }
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
 	cfg := &ConfigWrite{}
-	flagReg("remote-url", "URL to send samples via remote_write API.").
+	flagReg("remote-url", "URL to send samples via remote_write API. By default, path is set to api/v1/write").
 		URLVar(&cfg.URL)
 	flagReg("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").
 		IntVar(&cfg.Concurrency)
@@ -78,6 +72,8 @@ func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
 	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").
 		BoolVar(&cfg.OutOfOrder)
+	flagReg("remote-write-v2", "Send remote write v2 format requests.").Default("false").
+		BoolVar(&cfg.WriteV2)
 
 	return cfg
 }
@@ -101,27 +97,46 @@ func (c *ConfigWrite) Validate() error {
 
 // Client for the remote write requests.
 type Client struct {
-	client   *http.Client
-	timeout  time.Duration
-	config   *ConfigWrite
-	gatherer prometheus.Gatherer
+	client    *http.Client
+	logger    *slog.Logger
+	timeout   time.Duration
+	config    *ConfigWrite
+	gatherer  prometheus.Gatherer
+	remoteAPI *remote.API
 }
 
 // SendRemoteWrite initializes a http client and
 // sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(ctx context.Context, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
+func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &cfg.TLSClientConfig,
 	}
 	rt = &tenantRoundTripper{tenant: cfg.Tenant, tenantHeader: cfg.TenantHeader, rt: rt}
+	rt = &userAgentRoundTripper{userAgent: "avalanche", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
-	client := Client{
-		client:   httpClient,
-		timeout:  time.Minute,
-		config:   cfg,
-		gatherer: gatherer,
+	remoteAPI, err := remote.NewAPI(
+		httpClient,
+		cfg.URL.String(),
+		remote.WithAPILogger(logger.With("component", "remote_write_api")),
+	)
+	if err != nil {
+		return err
 	}
+
+	client := Client{
+		client:    httpClient,
+		logger:    logger,
+		timeout:   time.Minute,
+		config:    cfg,
+		gatherer:  gatherer,
+		remoteAPI: remoteAPI,
+	}
+
+	if cfg.WriteV2 {
+		return client.writeV2(ctx)
+	}
+
 	return client.write(ctx)
 }
 
@@ -136,6 +151,18 @@ type tenantRoundTripper struct {
 	tenant       string
 	tenantHeader string
 	rt           http.RoundTripper
+}
+
+// User agent round tripper
+type userAgentRoundTripper struct {
+	userAgent string
+	rt        http.RoundTripper
+}
+
+func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = cloneRequest(req)
+	req.Header.Set("User-Agent", rt.userAgent)
+	return rt.rt.RoundTrip(req)
 }
 
 // cloneRequest returns a clone of the provided *http.Request.
@@ -228,10 +255,13 @@ func (c *Client) write(ctx context.Context) error {
 				req := &prompb.WriteRequest{
 					Timeseries: tss[i:end],
 				}
-				if err := c.Store(context.TODO(), req); err != nil {
+
+				if _, err := c.remoteAPI.Write(ctx, req); err != nil {
 					merr.Add(err)
+					c.logger.Error("error writing metrics", "error", err)
 					return
 				}
+
 				mtx.Lock()
 				totalSamplesAct += len(tss[i:end])
 				mtx.Unlock()
@@ -247,7 +277,11 @@ func (c *Client) write(ctx context.Context) error {
 	if c.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	log.Printf("Total request time: %v ; Total samples: %v; Samples/sec: %v\n", totalTime.Round(time.Second), totalSamplesAct, int(float64(totalSamplesAct)/totalTime.Seconds()))
+	c.logger.Info("metrics summary",
+		"total_time", totalTime.Round(time.Second),
+		"total_samples", totalSamplesAct,
+		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),
+		"errors", merr.Count())
 	return merr.Err()
 }
 
@@ -334,46 +368,4 @@ func prompbLabels(name string, label []*dto.LabelPair) []prompb.Label {
 		return ret[i].Name < ret[j].Name
 	})
 	return ret
-}
-
-// Store sends a batch of samples to the HTTP endpoint.
-func (c *Client) Store(ctx context.Context, req *prompb.WriteRequest) error {
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return err
-	}
-
-	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.config.URL.String(), bytes.NewReader(compressed))
-	if err != nil {
-		// Errors from NewRequest are from unparseable URLs, so are not
-		// recoverable.
-		return err
-	}
-	httpReq.Header.Add("Content-Encoding", "snappy")
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-	httpReq.Header.Set("User-Agent", userAgent)
-	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
-	httpReq = httpReq.WithContext(ctx)
-
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
-
-	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
-	if err != nil {
-		return err
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode/100 != 2 {
-		scanner := bufio.NewScanner(io.LimitReader(httpResp.Body, maxErrMsgLen))
-		line := ""
-		if scanner.Scan() {
-			line = scanner.Text()
-		}
-		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
-		log.Println(err)
-	}
-
-	return err
 }
