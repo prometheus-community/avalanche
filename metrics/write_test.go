@@ -22,27 +22,25 @@ import (
 
 func TestShuffleTimestamps(t *testing.T) {
 	now := time.Now().UnixMilli()
-
+	minTime := 5 * time.Minute
 	tss := []prompb.TimeSeries{
 		{Samples: []prompb.Sample{{Timestamp: now}}},
 		{Samples: []prompb.Sample{{Timestamp: now}}},
 		{Samples: []prompb.Sample{{Timestamp: now}}},
 	}
 
-	shuffledTSS := shuffleTimestamps(tss)
+	shuffledTSS := shuffleTimestamps(minTime, tss)
+	interval := minTime.Milliseconds() / int64(len(tss))
 
-	offsets := []int64{0, -60 * 1000, -5 * 60 * 1000}
-	for _, ts := range shuffledTSS {
-		timestampValid := false
-		for _, offset := range offsets {
-			expectedTimestamp := now + offset
-			if ts.Samples[0].Timestamp == expectedTimestamp {
-				timestampValid = true
-				break
-			}
-		}
-		if !timestampValid {
-			t.Errorf("Timestamp %v is not in the expected offsets: %v", ts.Samples[0].Timestamp, offsets)
+	expectedTimestamps := []int64{
+		now,
+		now - interval,
+		now - 2*interval,
+	}
+
+	for i, ts := range shuffledTSS {
+		if ts.Samples[0].Timestamp != expectedTimestamps[i] {
+			t.Errorf("Expected timestamp %d, but got %d", expectedTimestamps[i], ts.Samples[0].Timestamp)
 		}
 	}
 
