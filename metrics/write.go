@@ -76,7 +76,7 @@ func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause
 	flagReg("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").
 		StringVar(&cfg.TenantHeader)
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
-	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("true").
+	flagReg("remote-out-of-order", "Enable out-of-order timestamps in remote write requests").Default("false").
 		BoolVar(&cfg.OutOfOrder)
 
 	return cfg
