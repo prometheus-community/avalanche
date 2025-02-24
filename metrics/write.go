@@ -97,7 +97,6 @@ func (c *ConfigWrite) Validate() error {
 
 // Client for the remote write requests.
 type Client struct {
-	client    *http.Client
 	logger    *slog.Logger
 	timeout   time.Duration
 	config    *ConfigWrite
@@ -125,7 +124,6 @@ func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite,
 	}
 
 	client := Client{
-		client:    httpClient,
 		logger:    logger,
 		timeout:   time.Minute,
 		config:    cfg,
