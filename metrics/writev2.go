@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/exp/api/remote"
 	writev2 "github.com/prometheus/client_golang/exp/api/remote/genproto/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -106,7 +107,7 @@ func (c *Client) writeV2(ctx context.Context) error {
 					Symbols:    st.Symbols(), // We pass full symbols table to each request for now
 				}
 
-				if _, err := c.remoteAPI.Write(ctx, req); err != nil {
+				if _, err := c.remoteAPI.Write(ctx, remote.WriteV2MessageType, req); err != nil {
 					merr.Add(err)
 					c.logger.Error("error writing metrics", "error", err)
 					return

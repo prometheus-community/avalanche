@@ -115,8 +115,8 @@ func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite,
 	httpClient := &http.Client{Transport: rt}
 
 	remoteAPI, err := remote.NewAPI(
-		httpClient,
 		cfg.URL.String(),
+		remote.WithAPIHTTPClient(httpClient),
 		remote.WithAPILogger(logger.With("component", "remote_write_api")),
 	)
 	if err != nil {
@@ -254,7 +254,7 @@ func (c *Client) write(ctx context.Context) error {
 					Timeseries: tss[i:end],
 				}
 
-				if _, err := c.remoteAPI.Write(ctx, req); err != nil {
+				if _, err := c.remoteAPI.Write(ctx, remote.WriteV1MessageType, req); err != nil {
 					merr.Add(err)
 					c.logger.Error("error writing metrics", "error", err)
 					return

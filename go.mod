@@ -9,7 +9,7 @@ require (
 	github.com/nelkinda/health-go v0.0.1
 	github.com/oklog/run v1.1.0
 	github.com/prometheus/client_golang v1.20.6-0.20250117112434-e0800f53b498
-	github.com/prometheus/client_golang/exp v0.0.0-20250131124507-433de6814d4b
+	github.com/prometheus/client_golang/exp v0.0.0-20250225163354-248c3f7f612b
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.62.0
 	github.com/prometheus/prometheus v0.53.1
@@ -30,6 +30,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	golang.org/x/sys v0.28.0 // indirect
-	google.golang.org/protobuf v1.36.1 // indirect
+	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
