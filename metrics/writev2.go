@@ -29,41 +29,41 @@ import (
 	"github.com/prometheus-community/avalanche/pkg/errors"
 )
 
-func (c *Client) writeV2(ctx context.Context) error {
+func (w *Writer) writeV2(ctx context.Context) error {
 	select {
 	// Wait for update first as write and collector.Run runs simultaneously.
-	case <-c.config.UpdateNotify:
+	case <-w.config.UpdateNotify:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
-	tss, st, err := collectMetricsV2(c.gatherer, c.config.OutOfOrder)
+	tss, st, err := collectMetricsV2(w.gatherer, w.config.OutOfOrder)
 	if err != nil {
 		return err
 	}
 
 	var (
 		totalTime       time.Duration
-		totalSamplesExp = len(tss) * c.config.RequestCount
+		totalSamplesExp = len(tss) * w.config.RequestCount
 		totalSamplesAct int
 		mtx             sync.Mutex
 		wgMetrics       sync.WaitGroup
 		merr            = &errors.MultiError{}
 	)
 
-	shouldRunForever := c.config.RequestCount == -1
+	shouldRunForever := w.config.RequestCount == -1
 	if shouldRunForever {
 		log.Printf("Sending: %v timeseries infinitely, %v timeseries per request, %v delay between requests\n",
-			len(tss), c.config.BatchSize, c.config.RequestInterval)
+			len(tss), w.config.BatchSize, w.config.RequestInterval)
 	} else {
 		log.Printf("Sending: %v timeseries, %v times, %v timeseries per request, %v delay between requests\n",
-			len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+			len(tss), w.config.RequestCount, w.config.BatchSize, w.config.RequestInterval)
 	}
 
-	ticker := time.NewTicker(c.config.RequestInterval)
+	ticker := time.NewTicker(w.config.RequestInterval)
 	defer ticker.Stop()
 
-	concurrencyLimitCh := make(chan struct{}, c.config.Concurrency)
+	concurrencyLimitCh := make(chan struct{}, w.config.Concurrency)
 
 	for i := 0; ; {
 		if ctx.Err() != nil {
@@ -71,7 +71,7 @@ func (c *Client) writeV2(ctx context.Context) error {
 		}
 
 		if !shouldRunForever {
-			if i >= c.config.RequestCount {
+			if i >= w.config.RequestCount {
 				break
 			}
 			i++
@@ -79,9 +79,9 @@ func (c *Client) writeV2(ctx context.Context) error {
 
 		<-ticker.C
 		select {
-		case <-c.config.UpdateNotify:
+		case <-w.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, st, err = collectMetricsV2(c.gatherer, c.config.OutOfOrder)
+			tss, st, err = collectMetricsV2(w.gatherer, w.config.OutOfOrder)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -90,7 +90,7 @@ func (c *Client) writeV2(ctx context.Context) error {
 		}
 
 		start := time.Now()
-		for i := 0; i < len(tss); i += c.config.BatchSize {
+		for i := 0; i < len(tss); i += w.config.BatchSize {
 			wgMetrics.Add(1)
 			concurrencyLimitCh <- struct{}{}
 			go func(i int) {
@@ -98,7 +98,7 @@ func (c *Client) writeV2(ctx context.Context) error {
 					<-concurrencyLimitCh
 				}()
 				defer wgMetrics.Done()
-				end := i + c.config.BatchSize
+				end := i + w.config.BatchSize
 				if end > len(tss) {
 					end = len(tss)
 				}
@@ -107,9 +107,9 @@ func (c *Client) writeV2(ctx context.Context) error {
 					Symbols:    st.Symbols(), // We pass full symbols table to each request for now
 				}
 
-				if _, err := c.remoteAPI.Write(ctx, remote.WriteV2MessageType, req); err != nil {
+				if _, err := w.remoteAPI.Write(ctx, remote.WriteV2MessageType, req); err != nil {
 					merr.Add(err)
-					c.logger.Error("error writing metrics", "error", err)
+					w.logger.Error("error writing metrics", "error", err)
 					return
 				}
 
@@ -125,10 +125,10 @@ func (c *Client) writeV2(ctx context.Context) error {
 			return merr.Err()
 		}
 	}
-	if c.config.RequestCount*len(tss) != totalSamplesAct {
+	if w.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	c.logger.Info("metrics summary",
+	w.logger.Info("metrics summary",
 		"total_time", totalTime.Round(time.Second),
 		"total_samples", totalSamplesAct,
 		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),

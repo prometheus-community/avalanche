@@ -95,8 +95,8 @@ func (c *ConfigWrite) Validate() error {
 	return nil
 }
 
-// Client for the remote write requests.
-type Client struct {
+// Writer for remote write requests.
+type Writer struct {
 	logger    *slog.Logger
 	timeout   time.Duration
 	config    *ConfigWrite
@@ -104,9 +104,8 @@ type Client struct {
 	remoteAPI *remote.API
 }
 
-// SendRemoteWrite initializes a http client and
-// sends metrics to a prometheus compatible remote endpoint.
-func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
+// NewRemoteWriter initializes a http client and starts a Writer for remote writing metrics to a prometheus compatible remote endpoint.
+func NewRemoteWriter(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &cfg.TLSClientConfig,
 	}
@@ -123,7 +122,7 @@ func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite,
 		return err
 	}
 
-	client := Client{
+	writer := Writer{
 		logger:    logger,
 		timeout:   time.Minute,
 		config:    cfg,
@@ -132,10 +131,10 @@ func SendRemoteWrite(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite,
 	}
 
 	if cfg.WriteV2 {
-		return client.writeV2(ctx)
+		return writer.writeV2(ctx)
 	}
 
-	return client.write(ctx)
+	return writer.write(ctx)
 }
 
 // Add the tenant ID header
@@ -177,41 +176,41 @@ func cloneRequest(r *http.Request) *http.Request {
 	return r2
 }
 
-func (c *Client) write(ctx context.Context) error {
+func (w *Writer) write(ctx context.Context) error {
 	select {
 	// Wait for update first as write and collector.Run runs simultaneously.
-	case <-c.config.UpdateNotify:
+	case <-w.config.UpdateNotify:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
-	tss, err := collectMetrics(c.gatherer, c.config.OutOfOrder)
+	tss, err := collectMetrics(w.gatherer, w.config.OutOfOrder)
 	if err != nil {
 		return err
 	}
 
 	var (
 		totalTime       time.Duration
-		totalSamplesExp = len(tss) * c.config.RequestCount
+		totalSamplesExp = len(tss) * w.config.RequestCount
 		totalSamplesAct int
 		mtx             sync.Mutex
 		wgMetrics       sync.WaitGroup
 		merr            = &errors.MultiError{}
 	)
 
-	shouldRunForever := c.config.RequestCount == -1
+	shouldRunForever := w.config.RequestCount == -1
 	if shouldRunForever {
 		log.Printf("Sending: %v timeseries infinitely, %v timeseries per request, %v delay between requests\n",
-			len(tss), c.config.BatchSize, c.config.RequestInterval)
+			len(tss), w.config.BatchSize, w.config.RequestInterval)
 	} else {
 		log.Printf("Sending: %v timeseries, %v times, %v timeseries per request, %v delay between requests\n",
-			len(tss), c.config.RequestCount, c.config.BatchSize, c.config.RequestInterval)
+			len(tss), w.config.RequestCount, w.config.BatchSize, w.config.RequestInterval)
 	}
 
-	ticker := time.NewTicker(c.config.RequestInterval)
+	ticker := time.NewTicker(w.config.RequestInterval)
 	defer ticker.Stop()
 
-	concurrencyLimitCh := make(chan struct{}, c.config.Concurrency)
+	concurrencyLimitCh := make(chan struct{}, w.config.Concurrency)
 
 	for i := 0; ; {
 		if ctx.Err() != nil {
@@ -219,7 +218,7 @@ func (c *Client) write(ctx context.Context) error {
 		}
 
 		if !shouldRunForever {
-			if i >= c.config.RequestCount {
+			if i >= w.config.RequestCount {
 				break
 			}
 			i++
@@ -227,9 +226,9 @@ func (c *Client) write(ctx context.Context) error {
 
 		<-ticker.C
 		select {
-		case <-c.config.UpdateNotify:
+		case <-w.config.UpdateNotify:
 			log.Println("updating remote write metrics")
-			tss, err = collectMetrics(c.gatherer, c.config.OutOfOrder)
+			tss, err = collectMetrics(w.gatherer, w.config.OutOfOrder)
 			if err != nil {
 				merr.Add(err)
 			}
@@ -238,7 +237,7 @@ func (c *Client) write(ctx context.Context) error {
 		}
 
 		start := time.Now()
-		for i := 0; i < len(tss); i += c.config.BatchSize {
+		for i := 0; i < len(tss); i += w.config.BatchSize {
 			wgMetrics.Add(1)
 			concurrencyLimitCh <- struct{}{}
 			go func(i int) {
@@ -246,7 +245,7 @@ func (c *Client) write(ctx context.Context) error {
 					<-concurrencyLimitCh
 				}()
 				defer wgMetrics.Done()
-				end := i + c.config.BatchSize
+				end := i + w.config.BatchSize
 				if end > len(tss) {
 					end = len(tss)
 				}
@@ -254,9 +253,9 @@ func (c *Client) write(ctx context.Context) error {
 					Timeseries: tss[i:end],
 				}
 
-				if _, err := c.remoteAPI.Write(ctx, remote.WriteV1MessageType, req); err != nil {
+				if _, err := w.remoteAPI.Write(ctx, remote.WriteV1MessageType, req); err != nil {
 					merr.Add(err)
-					c.logger.Error("error writing metrics", "error", err)
+					w.logger.Error("error writing metrics", "error", err)
 					return
 				}
 
@@ -272,10 +271,10 @@ func (c *Client) write(ctx context.Context) error {
 			return merr.Err()
 		}
 	}
-	if c.config.RequestCount*len(tss) != totalSamplesAct {
+	if w.config.RequestCount*len(tss) != totalSamplesAct {
 		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
-	c.logger.Info("metrics summary",
+	w.logger.Info("metrics summary",
 		"total_time", totalTime.Round(time.Second),
 		"total_samples", totalSamplesAct,
 		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),
