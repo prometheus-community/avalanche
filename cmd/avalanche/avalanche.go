@@ -87,7 +87,7 @@ func main() {
 	if writeCfg.URL != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(func() error {
-			if err := metrics.NewRemoteWriter(ctx, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), writeCfg, reg); err != nil {
+			if err := metrics.RunRemoteWriting(ctx, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), writeCfg, reg); err != nil {
 				return err
 			}
 			return nil // One-off.

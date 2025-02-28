@@ -104,8 +104,8 @@ type Writer struct {
 	remoteAPI *remote.API
 }
 
-// NewRemoteWriter initializes a http client and starts a Writer for remote writing metrics to a prometheus compatible remote endpoint.
-func NewRemoteWriter(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
+// RunRemoteWriting initializes a http client and starts a Writer for remote writing metrics to a prometheus compatible remote endpoint.
+func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
 	var rt http.RoundTripper = &http.Transport{
 		TLSClientConfig: &cfg.TLSClientConfig,
 	}
@@ -150,7 +150,6 @@ type tenantRoundTripper struct {
 	rt           http.RoundTripper
 }
 
-// User agent round tripper
 type userAgentRoundTripper struct {
 	userAgent string
 	rt        http.RoundTripper
