@@ -8,7 +8,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/nelkinda/health-go v0.0.1
 	github.com/oklog/run v1.1.0
-	github.com/prometheus/client_golang v1.20.6-0.20250117112434-e0800f53b498
+	github.com/prometheus/client_golang v1.21.0
 	github.com/prometheus/client_golang/exp v0.0.0-20250227122456-ad23ad6d5468
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.62.0
