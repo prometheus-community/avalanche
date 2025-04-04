@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -78,7 +79,8 @@ func main() {
 	if *avalancheFlagsForTotal > 0 {
 		fmt.Fprintln(os.Stdout)
 		fmt.Fprintln(os.Stdout, "Avalanche flags for the similar distribution to get to the adjusted series goal of:", *avalancheFlagsForTotal)
-		flags, adjustedSum := computeAvalancheFlags(*avalancheFlagsForTotal, total, statistics)
+		seriesCount := 10
+		flags, adjustedSum := computeAvalancheFlags(*avalancheFlagsForTotal, seriesCount, total, statistics)
 		for _, f := range flags {
 			fmt.Fprintln(os.Stdout, f)
 		}
@@ -96,10 +98,10 @@ func computeTotal(statistics map[dto.MetricType]stats) stats {
 	return total
 }
 
-func computeAvalancheFlags(avalancheFlagsForTotal int, total stats, statistics map[dto.MetricType]stats) ([]string, int) {
+func computeAvalancheFlags(avalancheFlagsForTotal, seriesCount int, total stats, statistics map[dto.MetricType]stats) ([]string, int) {
 	// adjustedGoal is tracking the # of adjusted series we want to generate with avalanche.
 	adjustedGoal := float64(avalancheFlagsForTotal)
-	adjustedGoal /= 10.0 // Assuming --series-count=10
+	adjustedGoal /= float64(seriesCount)
 	// adjustedSum is tracking the total sum of series so far (at the end hopefully adjustedSum ~= adjustedGoal)
 	adjustedSum := 0
 	// Accumulate flags
@@ -113,7 +115,10 @@ func computeAvalancheFlags(avalancheFlagsForTotal int, total stats, statistics m
 
 		// adjustedSeriesForType is tracking (per metric type), how many unique series of that
 		// metric type avalanche needs to create according to the ratio we got from our input.
-		adjustedSeriesForType := int(adjustedGoal * adjustedSeriesRatio)
+		var adjustedSeriesForType int
+		if !math.IsNaN(adjustedSeriesRatio) {
+			adjustedSeriesForType = int(adjustedGoal * adjustedSeriesRatio)
+		}
 
 		switch mtype {
 		case dto.MetricType_GAUGE:
@@ -123,19 +128,29 @@ func computeAvalancheFlags(avalancheFlagsForTotal int, total stats, statistics m
 			flags = append(flags, fmt.Sprintf("--counter-metric-count=%v", adjustedSeriesForType))
 			adjustedSum += adjustedSeriesForType
 		case dto.MetricType_HISTOGRAM:
-			avgBkts := s.buckets / s.series
-			adjustedSeriesForType /= 2 + avgBkts
+			var avgBkts int
+			if s.series > 0 {
+				avgBkts = s.buckets / s.series
+				adjustedSeriesForType /= 2 + avgBkts
+			}
 			flags = append(flags, fmt.Sprintf("--histogram-metric-count=%v", adjustedSeriesForType))
-			flags = append(flags, fmt.Sprintf("--histogram-metric-bucket-count=%v", avgBkts-1)) // -1 is due to caveat of additional +Inf not added by avalanche.
+			if s.series > 0 {
+				flags = append(flags, fmt.Sprintf("--histogram-metric-bucket-count=%v", avgBkts-1)) // -1 is due to caveat of additional +Inf not added by avalanche.
+			}
 			adjustedSum += adjustedSeriesForType * (2 + avgBkts)
 		case metricType_NATIVE_HISTOGRAM:
 			flags = append(flags, fmt.Sprintf("--native-histogram-metric-count=%v", adjustedSeriesForType))
 			adjustedSum += adjustedSeriesForType
 		case dto.MetricType_SUMMARY:
-			avgObjs := s.objectives / s.series
-			adjustedSeriesForType /= 2 + avgObjs
+			var avgObjs int
+			if s.series > 0 {
+				avgObjs = s.objectives / s.series
+				adjustedSeriesForType /= 2 + avgObjs
+			}
 			flags = append(flags, fmt.Sprintf("--summary-metric-count=%v", adjustedSeriesForType))
-			flags = append(flags, fmt.Sprintf("--summary-metric-objective-count=%v", avgObjs))
+			if s.series > 0 {
+				flags = append(flags, fmt.Sprintf("--summary-metric-objective-count=%v", avgObjs))
+			}
 			adjustedSum += adjustedSeriesForType * (2 + avgObjs)
 		default:
 			if s.series > 0 {
@@ -143,7 +158,7 @@ func computeAvalancheFlags(avalancheFlagsForTotal int, total stats, statistics m
 			}
 		}
 	}
-	flags = append(flags, fmt.Sprintf("--series-count=10"))
+	flags = append(flags, fmt.Sprintf("--series-count=%v", seriesCount))
 	// Changes values every 5m.
 	flags = append(flags, "--value-interval=300")
 	// 1h series churn.

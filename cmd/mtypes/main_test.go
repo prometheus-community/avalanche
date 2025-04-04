@@ -1100,6 +1100,7 @@ func TestComputeAvalancheFlags(t *testing.T) {
 	for _, tc := range []struct {
 		testName               string
 		avalancheFlagsForTotal int
+		seriesCount            int
 		statistics             map[dto.MetricType]stats
 		total                  stats
 		expectedSum            int
@@ -1108,6 +1109,7 @@ func TestComputeAvalancheFlags(t *testing.T) {
 		{
 			testName:               "samplePromInput",
 			avalancheFlagsForTotal: 1000,
+			seriesCount:            10,
 			statistics: map[dto.MetricType]stats{
 				dto.MetricType_COUNTER:   {families: 104, series: 166, adjustedSeries: 166},
 				dto.MetricType_GAUGE:     {families: 77, series: 94, adjustedSeries: 94},
@@ -1135,14 +1137,25 @@ func TestComputeAvalancheFlags(t *testing.T) {
 		{
 			testName:               "noInput",
 			avalancheFlagsForTotal: 1000,
+			seriesCount:            10,
 			statistics:             map[dto.MetricType]stats{},
 			total:                  stats{},
-			expectedSum:            84,
-			expectedFlags:          []string{},
+			expectedSum:            0,
+			expectedFlags: []string{
+				"--gauge-metric-count=0",
+				"--counter-metric-count=0",
+				"--histogram-metric-count=0",
+				"--native-histogram-metric-count=0",
+				"--summary-metric-count=0",
+				"--series-count=10",
+				"--value-interval=300",
+				"--series-interval=3600",
+				"--metric-interval=0",
+			},
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			avalancheFlags, adjustedSum := computeAvalancheFlags(tc.avalancheFlagsForTotal, tc.total, tc.statistics)
+			avalancheFlags, adjustedSum := computeAvalancheFlags(tc.avalancheFlagsForTotal, tc.seriesCount, tc.total, tc.statistics)
 			assert.Equal(t, tc.expectedSum, adjustedSum)
 			assert.Equal(t, tc.expectedFlags, avalancheFlags)
 		})
