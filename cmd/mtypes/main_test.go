@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCalculateTargetStatistics(t *testing.T) {
@@ -1097,41 +1098,45 @@ promhttp_metric_handler_requests_total{code="503"} 0
 
 func TestComputeAvalancheFlags(t *testing.T) {
 	for _, tc := range []struct {
-		testName       string
-		testInput      string
-		expectedResult map[dto.MetricType]stats
+		testName               string
+		avalancheFlagsForTotal int
+		statistics             map[dto.MetricType]stats
+		total                  stats
+		expectedSum            int
+		expectedFlags          []string
 	}{
 		{
-			testName:  "samplePromInput",
-			testInput: samplePromTestInput,
-			expectedResult: map[dto.MetricType]stats{
+			testName:               "samplePromInput",
+			avalancheFlagsForTotal: 1000,
+			statistics: map[dto.MetricType]stats{
 				dto.MetricType_COUNTER:   {families: 104, series: 166, adjustedSeries: 166},
 				dto.MetricType_GAUGE:     {families: 77, series: 94, adjustedSeries: 94},
 				dto.MetricType_HISTOGRAM: {families: 11, series: 17, adjustedSeries: 224, buckets: 190},
 				dto.MetricType_SUMMARY:   {families: 15, series: 27, adjustedSeries: 114, objectives: 60},
 			},
-		},
-		{
-			testName:       "empty",
-			testInput:      "",
-			expectedResult: map[dto.MetricType]stats{},
-		},
-		{
-			testName:  "justGauge",
-			testInput: justOneGaugeInput,
-			expectedResult: map[dto.MetricType]stats{
-				dto.MetricType_GAUGE: {families: 1, series: 1, adjustedSeries: 1},
+			total: stats{
+				families: 207, series: 304, adjustedSeries: 598,
+			},
+			expectedSum: 84,
+			expectedFlags: []string{
+				"--gauge-metric-count=15",
+				"--counter-metric-count=27",
+				"--histogram-metric-count=2",
+				"--histogram-metric-bucket-count=10",
+				"--native-histogram-metric-count=0",
+				"--summary-metric-count=4",
+				"--summary-metric-objective-count=2",
+				"--series-count=10",
+				"--value-interval=300",
+				"--series-interval=3600",
+				"--metric-interval=0",
 			},
 		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
-			s, err := calculateTargetStatistics(strings.NewReader(tc.testInput))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if diff := cmp.Diff(tc.expectedResult, s, cmp.AllowUnexported(stats{})); diff != "" {
-				t.Fatal(diff)
-			}
+			avalancheFlags, adjustedSum := computeAvalancheFlags(tc.avalancheFlagsForTotal, tc.total, tc.statistics)
+			assert.Equal(t, tc.expectedSum, adjustedSum)
+			assert.Equal(t, tc.expectedFlags, avalancheFlags)
 		})
 	}
 }
