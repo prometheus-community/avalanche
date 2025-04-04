@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,70 +74,98 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	total := computeTotal(statistics)
+	writeStatistics(os.Stdout, total, statistics)
+	if *avalancheFlagsForTotal > 0 {
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout, "Avalanche flags for the similar distribution to get to the adjusted series goal of:", *avalancheFlagsForTotal)
+		seriesCount := 10
+		flags, adjustedSum := computeAvalancheFlags(*avalancheFlagsForTotal, seriesCount, total, statistics)
+		for _, f := range flags {
+			fmt.Fprintln(os.Stdout, f)
+		}
+		fmt.Fprintln(os.Stdout, "This should give the total adjusted series to:", adjustedSum*10)
+	}
+}
+
+func computeTotal(statistics map[dto.MetricType]stats) stats {
 	var total stats
 	for _, s := range statistics {
 		total.families += s.families
 		total.series += s.series
 		total.adjustedSeries += s.adjustedSeries
 	}
+	return total
+}
 
-	writeStatistics(os.Stdout, total, statistics)
+func computeAvalancheFlags(avalancheFlagsForTotal, seriesCount int, total stats, statistics map[dto.MetricType]stats) ([]string, int) {
+	// adjustedGoal is tracking the # of adjusted series we want to generate with avalanche.
+	adjustedGoal := float64(avalancheFlagsForTotal)
+	adjustedGoal /= float64(seriesCount)
+	// adjustedSum is tracking the total sum of series so far (at the end hopefully adjustedSum ~= adjustedGoal)
+	adjustedSum := 0
+	// Accumulate flags
+	var flags []string
+	for _, mtype := range allTypes {
+		s := statistics[mtype]
 
-	if *avalancheFlagsForTotal > 0 {
-		// adjustedGoal is tracking the # of adjusted series we want to generate with avalanche.
-		adjustedGoal := float64(*avalancheFlagsForTotal)
-		fmt.Println()
-		fmt.Println("Avalanche flags for the similar distribution to get to the adjusted series goal of:", adjustedGoal)
+		// adjustedSeriesRatio is tracking the ratio of this type in the input file.
+		// We try to get similar ratio, but with different absolute counts, given the total sum of series we are aiming for.
+		adjustedSeriesRatio := float64(s.adjustedSeries) / float64(total.adjustedSeries)
 
-		adjustedGoal /= 10.0 // Assuming --series-count=10
-		// adjustedSum is tracking the total sum of series so far (at the end hopefully adjustedSum ~= adjustedGoal)
-		adjustedSum := 0
-		for _, mtype := range allTypes {
-			s := statistics[mtype]
+		// adjustedSeriesForType is tracking (per metric type), how many unique series of that
+		// metric type avalanche needs to create according to the ratio we got from our input.
+		var adjustedSeriesForType int
+		if !math.IsNaN(adjustedSeriesRatio) {
+			adjustedSeriesForType = int(adjustedGoal * adjustedSeriesRatio)
+		}
 
-			// adjustedSeriesRatio is tracking the ratio of this type in the input file.
-			// We try to get similar ratio, but with different absolute counts, given the total sum of series we are aiming for.
-			adjustedSeriesRatio := float64(s.adjustedSeries) / float64(total.adjustedSeries)
-
-			// adjustedSeriesForType is tracking (per metric type), how many unique series of that
-			// metric type avalanche needs to create according to the ratio we got from our input.
-			adjustedSeriesForType := int(adjustedGoal * adjustedSeriesRatio)
-
-			switch mtype {
-			case dto.MetricType_GAUGE:
-				fmt.Printf("--gauge-metric-count=%v\n", adjustedSeriesForType)
-				adjustedSum += adjustedSeriesForType
-			case dto.MetricType_COUNTER:
-				fmt.Printf("--counter-metric-count=%v\n", adjustedSeriesForType)
-				adjustedSum += adjustedSeriesForType
-			case dto.MetricType_HISTOGRAM:
-				avgBkts := s.buckets / s.series
+		switch mtype {
+		case dto.MetricType_GAUGE:
+			flags = append(flags, fmt.Sprintf("--gauge-metric-count=%v", adjustedSeriesForType))
+			adjustedSum += adjustedSeriesForType
+		case dto.MetricType_COUNTER:
+			flags = append(flags, fmt.Sprintf("--counter-metric-count=%v", adjustedSeriesForType))
+			adjustedSum += adjustedSeriesForType
+		case dto.MetricType_HISTOGRAM:
+			var avgBkts int
+			if s.series > 0 {
+				avgBkts = s.buckets / s.series
 				adjustedSeriesForType /= 2 + avgBkts
-				fmt.Printf("--histogram-metric-count=%v\n", adjustedSeriesForType)
-				fmt.Printf("--histogram-metric-bucket-count=%v\n", avgBkts-1) // -1 is due to caveat of additional +Inf not added by avalanche.
-				adjustedSum += adjustedSeriesForType * (2 + avgBkts)
-			case metricType_NATIVE_HISTOGRAM:
-				fmt.Printf("--native-histogram-metric-count=%v\n", adjustedSeriesForType)
-				adjustedSum += adjustedSeriesForType
-			case dto.MetricType_SUMMARY:
-				avgObjs := s.objectives / s.series
+			}
+			flags = append(flags, fmt.Sprintf("--histogram-metric-count=%v", adjustedSeriesForType))
+			if s.series > 0 {
+				flags = append(flags, fmt.Sprintf("--histogram-metric-bucket-count=%v", avgBkts-1)) // -1 is due to caveat of additional +Inf not added by avalanche.
+			}
+			adjustedSum += adjustedSeriesForType * (2 + avgBkts)
+		case metricType_NATIVE_HISTOGRAM:
+			flags = append(flags, fmt.Sprintf("--native-histogram-metric-count=%v", adjustedSeriesForType))
+			adjustedSum += adjustedSeriesForType
+		case dto.MetricType_SUMMARY:
+			var avgObjs int
+			if s.series > 0 {
+				avgObjs = s.objectives / s.series
 				adjustedSeriesForType /= 2 + avgObjs
-				fmt.Printf("--summary-metric-count=%v\n", adjustedSeriesForType)
-				fmt.Printf("--summary-metric-objective-count=%v\n", avgObjs)
-				adjustedSum += adjustedSeriesForType * (2 + avgObjs)
-			default:
-				if s.series > 0 {
-					log.Fatalf("not supported %v metric in avalanche", mtype)
-				}
+			}
+			flags = append(flags, fmt.Sprintf("--summary-metric-count=%v", adjustedSeriesForType))
+			if s.series > 0 {
+				flags = append(flags, fmt.Sprintf("--summary-metric-objective-count=%v", avgObjs))
+			}
+			adjustedSum += adjustedSeriesForType * (2 + avgObjs)
+		default:
+			if s.series > 0 {
+				log.Fatalf("not supported %v metric in avalanche", mtype)
 			}
 		}
-		fmt.Printf("--series-count=10\n")
-		fmt.Printf("--value-interval=300 # Changes values every 5m.\n")
-		fmt.Printf("--series-interval=3600 # 1h series churn.\n")
-		fmt.Printf("--metric-interval=0\n")
-
-		fmt.Println("This should give the total adjusted series to:", adjustedSum*10)
 	}
+	flags = append(flags, fmt.Sprintf("--series-count=%v", seriesCount))
+	// Changes values every 5m.
+	flags = append(flags, "--value-interval=300")
+	// 1h series churn.
+	flags = append(flags, "--series-interval=3600")
+	flags = append(flags, "--metric-interval=0")
+
+	return flags, adjustedSum
 }
 
 var allTypes = []dto.MetricType{dto.MetricType_GAUGE, dto.MetricType_COUNTER, dto.MetricType_HISTOGRAM, metricType_NATIVE_HISTOGRAM, dto.MetricType_GAUGE_HISTOGRAM, dto.MetricType_SUMMARY, dto.MetricType_UNTYPED}
