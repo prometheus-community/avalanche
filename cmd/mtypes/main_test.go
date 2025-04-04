@@ -22,22 +22,66 @@ import (
 )
 
 func TestCalculateTargetStatistics(t *testing.T) {
-	s, err := calculateTargetStatistics(strings.NewReader(testInput))
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := map[dto.MetricType]stats{
-		dto.MetricType_COUNTER:   {families: 104, series: 166, adjustedSeries: 166},
-		dto.MetricType_GAUGE:     {families: 77, series: 94, adjustedSeries: 94},
-		dto.MetricType_HISTOGRAM: {families: 11, series: 17, adjustedSeries: 224, buckets: 190},
-		dto.MetricType_SUMMARY:   {families: 15, series: 27, adjustedSeries: 114, objectives: 60},
-	}
-	if diff := cmp.Diff(expected, s, cmp.AllowUnexported(stats{})); diff != "" {
-		t.Fatal(diff)
+	for _, tc := range []struct {
+		testName       string
+		testInput      string
+		expectedResult map[dto.MetricType]stats
+		expectedTotal  stats
+	}{
+		{
+			testName:  "samplePromInput",
+			testInput: samplePromTestInput,
+			expectedResult: map[dto.MetricType]stats{
+				dto.MetricType_COUNTER:   {families: 104, series: 166, adjustedSeries: 166},
+				dto.MetricType_GAUGE:     {families: 77, series: 94, adjustedSeries: 94},
+				dto.MetricType_HISTOGRAM: {families: 11, series: 17, adjustedSeries: 224, buckets: 190},
+				dto.MetricType_SUMMARY:   {families: 15, series: 27, adjustedSeries: 114, objectives: 60},
+			},
+			expectedTotal: stats{
+				families: 207, series: 304, adjustedSeries: 598,
+			},
+		},
+		{
+			testName:       "empty",
+			testInput:      "",
+			expectedResult: map[dto.MetricType]stats{},
+			expectedTotal: stats{
+				families: 0, series: 0, adjustedSeries: 0,
+			},
+		},
+		{
+			testName:  "justGauge",
+			testInput: justOneGaugeInput,
+			expectedResult: map[dto.MetricType]stats{
+				dto.MetricType_GAUGE: {families: 1, series: 1, adjustedSeries: 1},
+			},
+			expectedTotal: stats{
+				families: 1, series: 1, adjustedSeries: 1,
+			},
+		},
+	} {
+		t.Run(tc.testName, func(t *testing.T) {
+			s, err := calculateTargetStatistics(strings.NewReader(tc.testInput))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(tc.expectedResult, s, cmp.AllowUnexported(stats{})); diff != "" {
+				t.Fatal(diff)
+			}
+			if totalDiff := cmp.Diff(tc.expectedTotal, computeTotal(s), cmp.AllowUnexported(stats{})); totalDiff != "" {
+				t.Fatal(totalDiff)
+			}
+		})
 	}
 }
 
-const testInput = `# HELP gcm_export_pending_requests Number of in-flight requests to GCM.
+const justOneGaugeInput = `
+# HELP up scrape successful
+# TYPE up gauge
+up 1
+`
+
+const samplePromTestInput = `# HELP gcm_export_pending_requests Number of in-flight requests to GCM.
 # TYPE gcm_export_pending_requests gauge
 gcm_export_pending_requests 1
 # HELP gcm_export_projects_per_batch Number of different projects in a batch that's being sent.
@@ -1050,3 +1094,44 @@ promhttp_metric_handler_requests_total{code="200"} 179357
 promhttp_metric_handler_requests_total{code="500"} 0
 promhttp_metric_handler_requests_total{code="503"} 0
 `
+
+func TestComputeAvalancheFlags(t *testing.T) {
+	for _, tc := range []struct {
+		testName       string
+		testInput      string
+		expectedResult map[dto.MetricType]stats
+	}{
+		{
+			testName:  "samplePromInput",
+			testInput: samplePromTestInput,
+			expectedResult: map[dto.MetricType]stats{
+				dto.MetricType_COUNTER:   {families: 104, series: 166, adjustedSeries: 166},
+				dto.MetricType_GAUGE:     {families: 77, series: 94, adjustedSeries: 94},
+				dto.MetricType_HISTOGRAM: {families: 11, series: 17, adjustedSeries: 224, buckets: 190},
+				dto.MetricType_SUMMARY:   {families: 15, series: 27, adjustedSeries: 114, objectives: 60},
+			},
+		},
+		{
+			testName:       "empty",
+			testInput:      "",
+			expectedResult: map[dto.MetricType]stats{},
+		},
+		{
+			testName:  "justGauge",
+			testInput: justOneGaugeInput,
+			expectedResult: map[dto.MetricType]stats{
+				dto.MetricType_GAUGE: {families: 1, series: 1, adjustedSeries: 1},
+			},
+		},
+	} {
+		t.Run(tc.testName, func(t *testing.T) {
+			s, err := calculateTargetStatistics(strings.NewReader(tc.testInput))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(tc.expectedResult, s, cmp.AllowUnexported(stats{})); diff != "" {
+				t.Fatal(diff)
+			}
+		})
+	}
+}
