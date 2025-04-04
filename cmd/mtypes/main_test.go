@@ -1132,6 +1132,14 @@ func TestComputeAvalancheFlags(t *testing.T) {
 				"--metric-interval=0",
 			},
 		},
+		{
+			testName:               "noInput",
+			avalancheFlagsForTotal: 1000,
+			statistics:             map[dto.MetricType]stats{},
+			total:                  stats{},
+			expectedSum:            84,
+			expectedFlags:          []string{},
+		},
 	} {
 		t.Run(tc.testName, func(t *testing.T) {
 			avalancheFlags, adjustedSum := computeAvalancheFlags(tc.avalancheFlagsForTotal, tc.total, tc.statistics)
