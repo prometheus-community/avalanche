@@ -1,5 +1,7 @@
 ./avalanche
 .build/
 .idea/
-mtypes
-avalanche
+/mtypes
+/avalanche
+/cmd/mtypes/mtypes
+/cmd/avalanche/avalanche
