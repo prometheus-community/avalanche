@@ -1,8 +1,6 @@
 module github.com/prometheus-community/avalanche
 
-go 1.23.0
-
-toolchain go1.23.1
+go 1.25.0
 
 require (
 	github.com/google/go-cmp v0.7.0
