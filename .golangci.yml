@@ -13,10 +13,6 @@ linters:
       - linters:
           - errcheck
         path: _test.go
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
 formatters:
   enable:
     - gofumpt
@@ -29,7 +25,3 @@ formatters:
         - github.com/prometheus-community/avalanche
   exclusions:
     generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
