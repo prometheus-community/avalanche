@@ -29,7 +29,7 @@ import (
 	"github.com/prometheus/common/version"
 	"gopkg.in/alecthomas/kingpin.v2"
 
-	"github.com/prometheus-community/avalanche/metrics"
+	"github.com/prometheus-community/avalanche/metricsgen"
 )
 
 func main() {
@@ -60,9 +60,9 @@ func main() {
 		"                 then returns it to the original count on the next tick. This pattern repeats indefinitely,\n" +
 		"                 creating a spiking effect in the series count.\n"
 
-	cfg := metrics.NewConfigFromFlags(kingpin.Flag)
+	cfg := metricsgen.NewConfigFromFlags(kingpin.Flag)
 	port := kingpin.Flag("port", "Port to serve at").Default("9001").Int()
-	writeCfg := metrics.NewWriteConfigFromFlags(kingpin.Flag)
+	writeCfg := metricsgen.NewWriteConfigFromFlags(kingpin.Flag)
 
 	kingpin.Parse()
 	if err := cfg.Validate(); err != nil {
@@ -72,7 +72,7 @@ func main() {
 		kingpin.FatalUsage("remote write config validation failed: %v", err)
 	}
 
-	collector := metrics.NewCollector(*cfg)
+	collector := metricsgen.NewCollector(*cfg)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collector)
 	writeCfg.UpdateNotify = collector.UpdateNotifyCh()
@@ -87,7 +87,7 @@ func main() {
 	if writeCfg.URL != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(func() error {
-			if err := metrics.RunRemoteWriting(ctx, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), writeCfg, reg); err != nil {
+			if err := metricsgen.RunRemoteWriting(ctx, slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), writeCfg, reg); err != nil {
 				return err
 			}
 			return nil // One-off.

@@ -11,11 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package metricsgen
 
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -31,8 +32,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"gopkg.in/alecthomas/kingpin.v2"
-
-	"github.com/prometheus-community/avalanche/pkg/errors"
 )
 
 // ConfigWrite for the remote write requests.
@@ -194,7 +193,7 @@ func (w *Writer) write(ctx context.Context) error {
 		totalSamplesAct int
 		mtx             sync.Mutex
 		wgMetrics       sync.WaitGroup
-		merr            = &errors.MultiError{}
+		merr            []error
 	)
 
 	shouldRunForever := w.config.RequestCount == -1
@@ -229,7 +228,7 @@ func (w *Writer) write(ctx context.Context) error {
 			log.Println("updating remote write metrics")
 			tss, err = collectMetrics(w.gatherer, w.config.OutOfOrder)
 			if err != nil {
-				merr.Add(err)
+				merr = append(merr, err)
 			}
 		default:
 			tss = updateTimetamps(tss)
@@ -253,7 +252,7 @@ func (w *Writer) write(ctx context.Context) error {
 				}
 
 				if _, err := w.remoteAPI.Write(ctx, remote.WriteV1MessageType, req); err != nil {
-					merr.Add(err)
+					merr = append(merr, err)
 					w.logger.Error("error writing metrics", "error", err)
 					return
 				}
@@ -265,20 +264,20 @@ func (w *Writer) write(ctx context.Context) error {
 		}
 		wgMetrics.Wait()
 		totalTime += time.Since(start)
-		if merr.Count() > 20 {
-			merr.Add(fmt.Errorf("too many errors"))
-			return merr.Err()
+		if countErrors(merr) > 20 {
+			merr = append(merr, errors.New("too many errors"))
+			return errors.Join(merr...)
 		}
 	}
 	if w.config.RequestCount*len(tss) != totalSamplesAct {
-		merr.Add(fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
+		merr = append(merr, fmt.Errorf("total samples mismatch, exp:%v , act:%v", totalSamplesExp, totalSamplesAct))
 	}
 	w.logger.Info("metrics summary",
 		"total_time", totalTime.Round(time.Second),
 		"total_samples", totalSamplesAct,
 		"samples_per_sec", int(float64(totalSamplesAct)/totalTime.Seconds()),
-		"errors", merr.Count())
-	return merr.Err()
+		"errors", countErrors(merr))
+	return errors.Join(merr...)
 }
 
 func updateTimetamps(tss []prompb.TimeSeries) []prompb.TimeSeries {
