@@ -44,8 +44,14 @@ var metricType_NATIVE_HISTOGRAM dto.MetricType = 999 //nolint:revive
 
 func main() {
 	resource := flag.String("resource", "", "Path or URL to the resource (file, <url>/metrics) containing Prometheus metric format.")
-	avalancheFlagsForTotal := flag.Int("avalanche-flags-for-adjusted-series", 0, "If more than zero, it additionally prints flags for the avalanche 0.6.0 command line to generate metrics for the similar type distribution; to get the total number of adjusted series to the given value.")
+	avalancheFlags := flag.Bool("avalanche-flags", false, "If passed, prints flags for avalanche to generate metrics to approximate the metrics count and type distribution from the input.")
+	avalancheFlagsForTotal := flag.Int("avalanche-flags-for-adjusted-series", 0, "If more than zero, adjust the printed avalanche flags to scale the total number of adjusted series to the given value.")
 	flag.Parse()
+
+	if *avalancheFlagsForTotal > 0 {
+		// --avalanche-flags-for-adjusted-series implies --avalanche-flags
+		*avalancheFlags = true
+	}
 
 	var input io.Reader = os.Stdin
 	if *resource != "" {
@@ -76,6 +82,9 @@ func main() {
 	}
 	total := computeTotal(statistics)
 	writeStatistics(os.Stdout, total, statistics)
+	if *avalancheFlags && *avalancheFlagsForTotal <= 0 {
+		*avalancheFlagsForTotal = total.series
+	}
 	if *avalancheFlagsForTotal > 0 {
 		fmt.Fprintln(os.Stdout)
 		fmt.Fprintln(os.Stdout, "Avalanche flags for the similar distribution to get to the adjusted series goal of:", *avalancheFlagsForTotal)
