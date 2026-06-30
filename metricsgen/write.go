@@ -16,12 +16,14 @@ package metricsgen
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -40,14 +42,17 @@ type ConfigWrite struct {
 	RequestInterval time.Duration
 	BatchSize,
 	RequestCount int
-	UpdateNotify    chan struct{}
-	PprofURLs       []*url.URL
-	Tenant          string
-	TLSClientConfig tls.Config
-	TenantHeader    string
-	OutOfOrder      bool
-	Concurrency     int
-	WriteV2         bool
+	UpdateNotify      chan struct{}
+	PprofURLs         []*url.URL
+	Tenant            string
+	TLSClientInsecure bool
+	TLSClientCertFile string
+	TLSClientKeyFile  string
+	TLSCACertFile     string
+	TenantHeader      string
+	OutOfOrder        bool
+	Concurrency       int
+	WriteV2           bool
 }
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
@@ -65,7 +70,13 @@ func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause
 	flagReg("remote-tenant", "Tenant ID to include in remote_write send").Default("0").
 		StringVar(&cfg.Tenant)
 	flagReg("tls-client-insecure", "Skip certificate check on tls connection").Default("false").
-		BoolVar(&cfg.TLSClientConfig.InsecureSkipVerify)
+		BoolVar(&cfg.TLSClientInsecure)
+	flagReg("tls-client-cert-file", "Client certificate file for TLS connections.").Default("").
+		StringVar(&cfg.TLSClientCertFile)
+	flagReg("tls-client-key-file", "Client key file for TLS connections.").Default("").
+		StringVar(&cfg.TLSClientKeyFile)
+	flagReg("tls-ca-cert-file", "CA certificate file to verify server certificate.").Default("").
+		StringVar(&cfg.TLSCACertFile)
 	flagReg("remote-tenant-header", "Tenant ID to include in remote_write send. The default, is the default tenant header expected by Cortex.").Default("X-Scope-OrgID").
 		StringVar(&cfg.TenantHeader)
 	// TODO(bwplotka): Make this a non-bool flag (e.g. out-of-order-min-time).
@@ -91,7 +102,44 @@ func (c *ConfigWrite) Validate() error {
 			return fmt.Errorf("--remote-write-interval must be greater than 0, got %v", c.RequestInterval)
 		}
 	}
+	if (c.TLSClientCertFile == "") != (c.TLSClientKeyFile == "") {
+		return fmt.Errorf("--tls-client-cert-file and --tls-client-key-file must both be set or both be unset")
+	}
 	return nil
+}
+
+func buildTLSConfig(insecure bool, certFile, keyFile, caFile string) (*tls.Config, error) {
+	if (certFile == "") != (keyFile == "") {
+		return nil, fmt.Errorf("--tls-client-cert-file and --tls-client-key-file must both be set or both be unset")
+	}
+
+	if insecure && caFile != "" {
+		log.Printf("warning: --tls-ca-cert-file is ignored when --tls-client-insecure is set")
+	}
+
+	cfg := &tls.Config{InsecureSkipVerify: insecure} //nolint:gosec
+
+	if certFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+
+	if caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA cert file: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA cert file %q: no valid PEM certificates found", caFile)
+		}
+		cfg.RootCAs = caCertPool
+	}
+
+	return cfg, nil
 }
 
 // Writer for remote write requests.
@@ -105,8 +153,13 @@ type Writer struct {
 
 // RunRemoteWriting initializes a http client and starts a Writer for remote writing metrics to a prometheus compatible remote endpoint.
 func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite, gatherer prometheus.Gatherer) error {
+	tlsCfg, err := buildTLSConfig(cfg.TLSClientInsecure, cfg.TLSClientCertFile, cfg.TLSClientKeyFile, cfg.TLSCACertFile)
+	if err != nil {
+		return err
+	}
+
 	var rt http.RoundTripper = &http.Transport{
-		TLSClientConfig: &cfg.TLSClientConfig,
+		TLSClientConfig: tlsCfg,
 	}
 	rt = &tenantRoundTripper{tenant: cfg.Tenant, tenantHeader: cfg.TenantHeader, rt: rt}
 	rt = &userAgentRoundTripper{userAgent: "avalanche", rt: rt}
