@@ -20,6 +20,26 @@ go install github.com/prometheus-community/avalanche/cmd/avalanche@latest
 ${GOPATH}/bin/avalanche --help
 ```
 
+### TLS flags for remote write
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tls-client-insecure` | `false` | Skip server certificate verification |
+| `--tls-client-cert-file` | `""` | Path to PEM-encoded client certificate (mTLS) |
+| `--tls-client-key-file` | `""` | Path to PEM-encoded client private key (mTLS) |
+| `--tls-ca-cert-file` | `""` | Path to PEM-encoded CA certificate to verify the server |
+
+`--tls-client-cert-file` and `--tls-client-key-file` must be set together or not at all.
+
+Example with mTLS:
+
+```bash
+avalanche --remote-url=https://example.com/api/v1/push \
+  --tls-client-cert-file=client.crt \
+  --tls-client-key-file=client.key \
+  --tls-ca-cert-file=ca.crt
+```
+
 ### Docker 
 
 ```bash
