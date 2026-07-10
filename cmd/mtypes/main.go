@@ -203,7 +203,7 @@ func writeStatistics(writer io.Writer, total stats, statistics map[dto.MetricTyp
 
 func calculateTargetStatistics(r io.Reader) (statistics map[dto.MetricType]stats, _ error) {
 	// Parse the Prometheus Text format.
-	parser := expfmt.NewDecoder(r, expfmt.NewFormat(expfmt.TypeProtoText))
+	parser := expfmt.NewDecoder(r, expfmt.NewFormat(expfmt.TypeTextPlain))
 
 	statistics = map[dto.MetricType]stats{}
 	nativeS := statistics[metricType_NATIVE_HISTOGRAM]
