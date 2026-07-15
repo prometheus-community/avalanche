@@ -57,7 +57,7 @@ type ConfigWrite struct {
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
 	cfg := &ConfigWrite{}
-	flagReg("remote-url", "URL to send samples via remote_write API. By default, path is set to api/v1/write").
+	flagReg("remote-url", "URL to send samples via remote_write API. A URL path (other than a bare '/') is used after the client's path cleaning (e.g. trailing slashes are dropped); host-only URLs get the default path api/v1/write appended.").
 		URLVar(&cfg.URL)
 	flagReg("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").
 		IntVar(&cfg.Concurrency)
