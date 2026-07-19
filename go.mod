@@ -10,7 +10,7 @@ require (
 	github.com/prometheus/client_golang/exp v0.0.0-20260708163044-20355eb4487c
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.69.0
-	github.com/prometheus/prometheus v0.313.0
+	github.com/prometheus/prometheus v0.313.1
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )
