@@ -14,10 +14,20 @@
 package metricsgen
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/exp/api/remote"
+	writev2 "github.com/prometheus/client_golang/exp/api/remote/genproto/v2"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestShuffleTimestamps(t *testing.T) {
@@ -56,5 +66,73 @@ func TestShuffleTimestamps(t *testing.T) {
 
 	if !outOfOrder {
 		t.Error("Timestamps are not out of order")
+	}
+}
+
+func TestNewRemoteAPIPath(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		urlPath   string
+		wantPath  string
+		wantQuery string
+	}{
+		{name: "no path appends default", urlPath: "", wantPath: "/api/v1/write"},
+		{name: "root path appends default", urlPath: "/", wantPath: "/api/v1/write"},
+		{name: "custom path is respected", urlPath: "/api/v1/receive", wantPath: "/api/v1/receive"},
+		{name: "trailing slash is cleaned", urlPath: "/api/v1/receive/", wantPath: "/api/v1/receive"},
+		{name: "prefix path is respected", urlPath: "/prometheus", wantPath: "/prometheus"},
+		{name: "query string preserved", urlPath: "/api/v1/receive?tenant=a", wantPath: "/api/v1/receive", wantQuery: "tenant=a"},
+		{name: "escaped path segment preserved", urlPath: "/tenant%2Freceive", wantPath: "/tenant%2Freceive"},
+		{name: "double slash is cleaned", urlPath: "//foo", wantPath: "/foo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				mu       sync.Mutex
+				gotPath  string
+				gotQuery string
+			)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				gotPath = r.URL.EscapedPath()
+				gotQuery = r.URL.RawQuery
+				mu.Unlock()
+				w.Header().Set("X-Prometheus-Remote-Write-Samples-Written", "0")
+				w.Header().Set("X-Prometheus-Remote-Write-Histograms-Written", "0")
+				w.Header().Set("X-Prometheus-Remote-Write-Exemplars-Written", "0")
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(srv.Close)
+
+			u, err := url.Parse(srv.URL + tc.urlPath)
+			require.NoError(t, err)
+
+			api, err := newRemoteAPI(
+				&ConfigWrite{URL: u},
+				slog.New(slog.NewTextHandler(io.Discard, nil)),
+				srv.Client(),
+			)
+			require.NoError(t, err)
+
+			for _, msg := range []struct {
+				typ remote.WriteMessageType
+				req any
+			}{
+				{typ: remote.WriteV1MessageType, req: &prompb.WriteRequest{}},
+				{typ: remote.WriteV2MessageType, req: &writev2.Request{Symbols: []string{""}}},
+			} {
+				mu.Lock()
+				gotPath = ""
+				gotQuery = ""
+				mu.Unlock()
+
+				_, err = api.Write(context.Background(), msg.typ, msg.req)
+				require.NoError(t, err)
+
+				mu.Lock()
+				require.Equal(t, tc.wantPath, gotPath)
+				require.Equal(t, tc.wantQuery, gotQuery)
+				mu.Unlock()
+			}
+		})
 	}
 }
