@@ -82,7 +82,10 @@ func TestNewRemoteAPIPath(t *testing.T) {
 		{name: "trailing slash is cleaned", urlPath: "/api/v1/receive/", wantPath: "/api/v1/receive"},
 		{name: "prefix path is respected", urlPath: "/prometheus", wantPath: "/prometheus"},
 		{name: "query string preserved", urlPath: "/api/v1/receive?tenant=a", wantPath: "/api/v1/receive", wantQuery: "tenant=a"},
-		{name: "escaped path segment preserved", urlPath: "/tenant%2Freceive", wantPath: "/tenant%2Freceive"},
+		// remote.NewAPI assigns the joined path to url.URL.Path without
+		// updating RawPath, so once the path is passed separately from the
+		// base URL an escaped segment survives only in its decoded form.
+		{name: "escaped path segment is decoded", urlPath: "/tenant%2Freceive", wantPath: "/tenant/receive"},
 		{name: "double slash is cleaned", urlPath: "//foo", wantPath: "/foo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -185,23 +185,28 @@ func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite
 	return writer.write(ctx)
 }
 
-// newRemoteAPI builds the remote write client. If the user-supplied URL has
-// a path (other than a bare "/"), it is kept, subject to the client's path
-// cleaning (trailing and duplicate slashes are dropped). Host-only URLs and
-// a bare "/" get the client's default path, api/v1/write; posting samples
-// to "/" is almost never intended.
+// newRemoteAPI builds the remote write client. remote.NewAPI takes the base
+// URL and the API path separately and path.Join-s the latter onto the former,
+// so a --remote-url that already carries a path (Thanos Receive's
+// /api/v1/receive, say) grew the default api/v1/write on top of it. Split the
+// flag's URL along the same seam: everything but the path becomes the base,
+// the path becomes the API path. It is passed subject to the client's path
+// cleaning, so trailing and duplicate slashes are dropped, and percent-encoded
+// segments are decoded. Host-only URLs and a bare "/" keep the client's
+// default path, api/v1/write; posting samples to "/" is almost never intended.
 // See https://github.com/prometheus-community/avalanche/issues/173.
 func newRemoteAPI(cfg *ConfigWrite, logger *slog.Logger, httpClient *http.Client) (*remote.API, error) {
 	opts := []remote.APIOption{
 		remote.WithAPIHTTPClient(httpClient),
 		remote.WithAPILogger(logger.With("component", "remote_write_api")),
 	}
-	if cfg.URL.Path != "" && cfg.URL.Path != "/" {
-		// remote.NewAPI path.Join-s its path option onto the URL's path;
-		// an empty path option keeps the URL's path as-is.
-		opts = append(opts, remote.WithAPIPath(""))
+
+	baseURL := *cfg.URL
+	baseURL.Path, baseURL.RawPath = "", ""
+	if apiPath := cfg.URL.Path; apiPath != "" && apiPath != "/" {
+		opts = append(opts, remote.WithAPIPath(apiPath))
 	}
-	return remote.NewAPI(cfg.URL.String(), opts...)
+	return remote.NewAPI(baseURL.String(), opts...)
 }
 
 // Add the tenant ID header
