@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -190,12 +191,26 @@ func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite
 // so a --remote-url that already carries a path (Thanos Receive's
 // /api/v1/receive, say) grew the default api/v1/write on top of it. Split the
 // flag's URL along the same seam: everything but the path becomes the base,
-// the path becomes the API path. It is passed subject to the client's path
-// cleaning, so trailing and duplicate slashes are dropped, and percent-encoded
-// segments are decoded. Host-only URLs and a bare "/" keep the client's
-// default path, api/v1/write; posting samples to "/" is almost never intended.
+// the path becomes the API path, subject to the client's path cleaning, so
+// trailing and duplicate slashes are dropped. Host-only URLs and a bare "/"
+// keep the client's default path, api/v1/write; posting samples to "/" is
+// almost never intended.
 // See https://github.com/prometheus-community/avalanche/issues/173.
 func newRemoteAPI(cfg *ConfigWrite, logger *slog.Logger, httpClient *http.Client) (*remote.API, error) {
+	// url.URL carries the path twice: Path decoded, and RawPath holding the
+	// original spelling whenever it is not the canonical encoding of Path.
+	// remote.NewAPI assigns its joined path to Path alone, so passing the path
+	// separately from the base URL leaves RawPath behind and the endpoint sees
+	// the decoded form. That is correct for unreserved characters (%61 is just
+	// "a"), but an encoded separator is not a separator: %2F would silently
+	// turn one segment into two and post the samples somewhere else. Slashes
+	// are the only delimiter at risk, since url.URL escapes the others when it
+	// re-encodes a path, so comparing slash counts detects exactly that case.
+	if cfg.URL.RawPath != "" &&
+		strings.Count(cfg.URL.Path, "/") != strings.Count(cfg.URL.RawPath, "/") {
+		return nil, fmt.Errorf("--remote-url path %q contains an escaped separator that the remote write client cannot preserve; it would post to %q instead", cfg.URL.EscapedPath(), cfg.URL.Path)
+	}
+
 	opts := []remote.APIOption{
 		remote.WithAPIHTTPClient(httpClient),
 		remote.WithAPILogger(logger.With("component", "remote_write_api")),

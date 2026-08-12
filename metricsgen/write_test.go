@@ -75,6 +75,7 @@ func TestNewRemoteAPIPath(t *testing.T) {
 		urlPath   string
 		wantPath  string
 		wantQuery string
+		wantErr   string
 	}{
 		{name: "no path appends default", urlPath: "", wantPath: "/api/v1/write"},
 		{name: "root path appends default", urlPath: "/", wantPath: "/api/v1/write"},
@@ -82,10 +83,12 @@ func TestNewRemoteAPIPath(t *testing.T) {
 		{name: "trailing slash is cleaned", urlPath: "/api/v1/receive/", wantPath: "/api/v1/receive"},
 		{name: "prefix path is respected", urlPath: "/prometheus", wantPath: "/prometheus"},
 		{name: "query string preserved", urlPath: "/api/v1/receive?tenant=a", wantPath: "/api/v1/receive", wantQuery: "tenant=a"},
-		// remote.NewAPI assigns the joined path to url.URL.Path without
-		// updating RawPath, so once the path is passed separately from the
-		// base URL an escaped segment survives only in its decoded form.
-		{name: "escaped path segment is decoded", urlPath: "/tenant%2Freceive", wantPath: "/tenant/receive"},
+		// Escaping an unreserved character says nothing about the endpoint,
+		// so decoding it is plain normalization. Escaping a separator does
+		// say something, and the client cannot carry it, so it is rejected
+		// rather than silently posted to a different path.
+		{name: "escaped unreserved character is normalized", urlPath: "/ten%61nt", wantPath: "/tenant"},
+		{name: "escaped separator is rejected", urlPath: "/tenant%2Freceive", wantErr: "contains an escaped separator"},
 		{name: "double slash is cleaned", urlPath: "//foo", wantPath: "/foo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,6 +117,10 @@ func TestNewRemoteAPIPath(t *testing.T) {
 				slog.New(slog.NewTextHandler(io.Discard, nil)),
 				srv.Client(),
 			)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
 			require.NoError(t, err)
 
 			for _, msg := range []struct {
