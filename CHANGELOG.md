@@ -1,5 +1,7 @@
 ## unreleased
 
+* [BUGFIX] Remote write: the path of `--remote-url` is now respected instead of always appending `api/v1/write`. URLs that relied on the previous prefix behavior (own path with `api/v1/write` appended) must now include the full write path. #196
+
 ## 0.7.0 / 2025-01-14
 
 * [CHANGE] (breaking) Removed the deprecated `--metric-count` flag (use `--gauge-metric-count` instead). #119

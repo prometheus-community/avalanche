@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,7 +58,7 @@ type ConfigWrite struct {
 
 func NewWriteConfigFromFlags(flagReg func(name, help string) *kingpin.FlagClause) *ConfigWrite {
 	cfg := &ConfigWrite{}
-	flagReg("remote-url", "URL to send samples via remote_write API. By default, path is set to api/v1/write").
+	flagReg("remote-url", "URL to send samples via remote_write API. A URL path (other than a bare '/') is used after the client's path cleaning (e.g. trailing slashes are dropped); host-only URLs get the default path api/v1/write appended.").
 		URLVar(&cfg.URL)
 	flagReg("remote-concurrency-limit", "how many concurrent writes can happen at any given time").Default("20").
 		IntVar(&cfg.Concurrency)
@@ -165,11 +166,7 @@ func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite
 	rt = &userAgentRoundTripper{userAgent: "avalanche", rt: rt}
 	httpClient := &http.Client{Transport: rt}
 
-	remoteAPI, err := remote.NewAPI(
-		cfg.URL.String(),
-		remote.WithAPIHTTPClient(httpClient),
-		remote.WithAPILogger(logger.With("component", "remote_write_api")),
-	)
+	remoteAPI, err := newRemoteAPI(cfg, logger, httpClient)
 	if err != nil {
 		return err
 	}
@@ -187,6 +184,44 @@ func RunRemoteWriting(ctx context.Context, logger *slog.Logger, cfg *ConfigWrite
 	}
 
 	return writer.write(ctx)
+}
+
+// newRemoteAPI builds the remote write client. remote.NewAPI takes the base
+// URL and the API path separately and path.Join-s the latter onto the former,
+// so a --remote-url that already carries a path (Thanos Receive's
+// /api/v1/receive, say) grew the default api/v1/write on top of it. Split the
+// flag's URL along the same seam: everything but the path becomes the base,
+// the path becomes the API path, subject to the client's path cleaning, so
+// trailing and duplicate slashes are dropped. Host-only URLs and a bare "/"
+// keep the client's default path, api/v1/write; posting samples to "/" is
+// almost never intended.
+// See https://github.com/prometheus-community/avalanche/issues/173.
+func newRemoteAPI(cfg *ConfigWrite, logger *slog.Logger, httpClient *http.Client) (*remote.API, error) {
+	// url.URL carries the path twice: Path decoded, and RawPath holding the
+	// original spelling whenever it is not the canonical encoding of Path.
+	// remote.NewAPI assigns its joined path to Path alone, so passing the path
+	// separately from the base URL leaves RawPath behind and the endpoint sees
+	// the decoded form. That is correct for unreserved characters (%61 is just
+	// "a"), but an encoded separator is not a separator: %2F would silently
+	// turn one segment into two and post the samples somewhere else. Slashes
+	// are the only delimiter at risk, since url.URL escapes the others when it
+	// re-encodes a path, so comparing slash counts detects exactly that case.
+	if cfg.URL.RawPath != "" &&
+		strings.Count(cfg.URL.Path, "/") != strings.Count(cfg.URL.RawPath, "/") {
+		return nil, fmt.Errorf("--remote-url path %q contains an escaped separator that the remote write client cannot preserve; it would post to %q instead", cfg.URL.EscapedPath(), cfg.URL.Path)
+	}
+
+	opts := []remote.APIOption{
+		remote.WithAPIHTTPClient(httpClient),
+		remote.WithAPILogger(logger.With("component", "remote_write_api")),
+	}
+
+	baseURL := *cfg.URL
+	baseURL.Path, baseURL.RawPath = "", ""
+	if apiPath := cfg.URL.Path; apiPath != "" && apiPath != "/" {
+		opts = append(opts, remote.WithAPIPath(apiPath))
+	}
+	return remote.NewAPI(baseURL.String(), opts...)
 }
 
 // Add the tenant ID header
