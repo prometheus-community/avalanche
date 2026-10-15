@@ -22,12 +22,12 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/nelkinda/health-go"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
-	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/prometheus-community/avalanche/metricsgen"
 )
